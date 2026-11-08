@@ -648,7 +648,7 @@ function facetsFor(view, opts) {
     const pins = comp.pins || []
 
     // shadow: same footprint at the body's base, offset in screen space at draw
-    pushPoly(corners.map((p) => [p[0], p[1], z0]), '#000000', [0, 0, 1], 0, 'top', 2.5, { shadow: true })
+    pushPoly(corners.map((p) => [p[0], p[1], z0]), color, [0, 0, 1], 0, 'top', 2.5, { shadow: true })
 
     pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3, {
       label: { text: comp.ref, w: b.w, h: b.h, ink: inkFor(color) },
@@ -830,15 +830,16 @@ function drawBoard3D(g, view, opts) {
   // than a floating diagram. Drawn first so every face paints over it.
   const shadowPts = undersideLight ? [] : (view.outline || []).map((p) => project([p[0], p[1], 0]))
   if (shadowPts.length > 2 && !shadowPts.some((p) => p === null)) {
+    // Solid, not blurred: a translucent shadow is still a see-through element.
+    // A hard offset silhouette in a darker shade gives the same lift with no
+    // alpha anywhere in the scene.
     g.save()
     g.beginPath()
-    g.moveTo(shadowPts[0][0] + 10, shadowPts[0][1] + 16)
-    for (let i = 1; i < shadowPts.length; i += 1) g.lineTo(shadowPts[i][0] + 10, shadowPts[i][1] + 16)
+    g.moveTo(shadowPts[0][0] + 9, shadowPts[0][1] + 14)
+    for (let i = 1; i < shadowPts.length; i += 1) g.lineTo(shadowPts[i][0] + 9, shadowPts[i][1] + 14)
     g.closePath()
-    g.filter = 'blur(14px)'
-    g.fillStyle = 'rgba(0,0,0,0.45)'
+    g.fillStyle = '#07130d'
     g.fill()
-    g.filter = 'none'
     g.restore()
   }
 
@@ -883,12 +884,14 @@ function drawBoard3D(g, view, opts) {
     const shade = 0.68 + 0.32 * lambert
 
     if (f.shadow) {
-      // part contact shadow: same footprint, pushed down-right on screen
+      // Part shadow: the same footprint pushed down-right, filled with an opaque
+      // darkened copy of the part colour — solid, so nothing in the scene is
+      // see-through.
       g.beginPath()
       g.moveTo(pts[0][0] + 2.5, pts[0][1] + 4)
       for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0] + 2.5, pts[i][1] + 4)
       g.closePath()
-      g.fillStyle = 'rgba(0,0,0,0.30)'
+      g.fillStyle = shadeColor(f.color, 0.45, 1)
       g.fill()
       continue
     }
@@ -914,7 +917,7 @@ function drawBoard3D(g, view, opts) {
       if (dot) {
         g.beginPath()
         g.arc(dot[0], dot[1], 2.2, 0, Math.PI * 2)
-        g.fillStyle = 'rgba(0,0,0,0.45)'
+        g.fillStyle = '#0b0e0d'
         g.fill()
       }
     }
