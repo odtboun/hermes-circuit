@@ -19,7 +19,7 @@ TEMPLATES: Dict[str, dict] = {
         "board": {"width": 68, "height": 44, "corner_radius": 3},
         "components": [
             ("pico", "U1", "Pico", {
-                "39": "VSYS", "36": "+3V3", "40": "VBUS",
+                "39": "VSYS", "36": "+3V3",
                 "3": "GND", "8": "GND", "13": "GND", "18": "GND",
                 "23": "GND", "28": "GND", "33": "GND", "38": "GND",
                 "20": "LED", "19": "BTN",
