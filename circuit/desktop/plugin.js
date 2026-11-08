@@ -753,9 +753,9 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       // the number of move events, so the same 100 px drag spun the board 5x or
       // 40x depending on the pointer's event rate.
       s.yaw = s.drag.yaw + dx * 0.01
-      // Drag down to tip the board's top face towards the viewer (sp < 0 puts
-      // the top face above the bottom one on screen).
-      s.pitch = Math.max(-1.35, Math.min(1.35, s.drag.pitch - dy * 0.008))
+      // Drag down raises pitch: the board follows the pointer. The sign was
+      // inverted, so vertical drags fought the hand.
+      s.pitch = Math.max(-1.35, Math.min(1.35, s.drag.pitch + dy * 0.008))
     }
     draw()
   }
