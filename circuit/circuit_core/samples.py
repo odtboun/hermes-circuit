@@ -24,6 +24,28 @@ MAX_BYTES = 40 * 1024 * 1024
 _TIMEOUT_S = 90
 _LICENSE = "GPL-3.0-or-later (KiCad demo project)"
 
+
+def download_board(url: str, dest: Path, label: str = "board") -> Path:
+    """Fetch a ``.kicad_pcb`` from ``url`` into ``dest``.
+
+    Shared by the sample catalogue and ``circuit_import url=…`` so both get the
+    same guards: a size cap, and a rejection of anything that is not a KiCad
+    s-expression (a GitLab/GitHub error page would otherwise parse as an empty
+    board and look like a viewer bug).
+    """
+    request = urllib.request.Request(url, headers={"User-Agent": "hermes-circuit"})
+    try:
+        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
+            payload = response.read(MAX_BYTES + 1)
+    except Exception as exc:  # network, DNS, TLS, HTTP status
+        raise BoardError(f"could not download {label}: {exc}") from exc
+    if len(payload) > MAX_BYTES:
+        raise BoardError(f"{label} is larger than {MAX_BYTES // (1024 * 1024)} MB — refusing")
+    if not payload.lstrip().startswith(b"("):
+        raise BoardError(f"{label} did not return a KiCad board (got an HTML/error page)")
+    dest.write_bytes(payload)
+    return dest
+
 SAMPLES: Dict[str, dict] = {
     "tiny-tapeout": {
         "title": "Tiny Tapeout demo",
@@ -98,20 +120,7 @@ def fetch(sample_id: str, dest: Path) -> Path:
         raise BoardError(
             f"unknown sample {sample_id!r} (one of: {', '.join(SAMPLES)})"
         )
-    request = urllib.request.Request(_url(entry), headers={"User-Agent": "hermes-circuit"})
-    try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
-            payload = response.read(MAX_BYTES + 1)
-    except Exception as exc:  # network, DNS, TLS, HTTP status
-        raise BoardError(f"could not download {sample_id!r}: {exc}") from exc
-    if len(payload) > MAX_BYTES:
-        raise BoardError(f"{sample_id!r} is larger than {MAX_BYTES // (1024 * 1024)} MB — refusing")
-    if not payload.lstrip().startswith(b"("):
-        # A GitLab error page or an HTML login wall would otherwise be parsed as
-        # a board and produce a confusing empty result.
-        raise BoardError(f"{sample_id!r} did not return a KiCad board (got an HTML/error page)")
-    dest.write_bytes(payload)
-    return dest
+    return download_board(_url(entry), dest, label=repr(sample_id))
 
 
 def load(sample_id: str) -> dict:

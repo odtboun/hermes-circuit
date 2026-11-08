@@ -57,15 +57,19 @@ IMPORT = {
         "Open an existing KiCad board (.kicad_pcb, KiCad 6/7/8 and newer) as a read-only Circuit "
         "project so it can be inspected and rendered in the viewer. The board is parsed as-is: "
         "Edge.Cuts outline, footprints, pads, tracks, vias and nets become a view document — nothing "
-        "is re-placed, re-routed or design-rule checked. Returns the new board id. Re-importing the "
-        "same file replaces that project."
+        "is re-placed, re-routed or design-rule checked. Pass either a local `path` or a `url` "
+        "(e.g. a raw.githubusercontent.com link to an open-source board). Returns the new board id; "
+        "re-importing the same file or url replaces that project."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Absolute path to a .kicad_pcb file."},
+            "url": {"type": "string",
+                    "description": "http(s) URL of a .kicad_pcb (raw file, not an HTML viewer page). "
+                                   "Use instead of path."},
         },
-        "required": ["path"],
+        "required": [],
     },
 }
 

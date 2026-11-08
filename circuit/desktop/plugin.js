@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'circuit'
+const PITCH_LIMIT = Math.PI - 0.02
 const ROUTE = '/circuit'
 
 // Physical board colours (a PCB is green/copper regardless of the app theme).
@@ -375,25 +376,26 @@ function facetsFor(view, opts) {
   const outline = view.outline || []
   const lift = opts.explode ? 6 : 0
 
-  const pushPoly = (pts3, color, normalHint, liftAmount = 0, order = 0) => {
+  // Faces carry (side, rank), not a fixed paint index. A 2-layer board is a
+  // stack of near-coplanar sheets (bottom sheet, edges, top sheet, traces, pads,
+  // bodies) and sorting the whole set by average depth cannot order those — a
+  // far pad ends up "behind" the single big top face and gets buried. `rank`
+  // orders the sheets on one side; drawBoard3D turns the pair into a paint order
+  // for whichever side currently faces the camera, so the board can be turned all
+  // the way over and its underside renders correctly too.
+  const pushPoly = (pts3, color, normalHint, liftAmount, side, rank) => {
     if (!pts3 || pts3.length < 3) return
     faces.push({
       pts: pts3.map((p) => [p[0], p[1], p[2] + liftAmount]),
       color,
       n: normalHint,
-      order
+      side,
+      rank
     })
   }
 
-  // `order` is the paint pass, not a depth. A 2-layer board is a stack of
-  // near-coplanar sheets (bottom, sides, top, traces, pads, bodies); sorting the
-  // whole set by average depth cannot order those — a far pad ends up "behind"
-  // the single big top face and gets buried. The orbit never goes under the
-  // board (pitch is clamped, camera stays on +z), so a fixed stack is correct
-  // for every reachable angle and only the bodies need a real depth sort.
-
-  // substrate: bottom, sides, top
-  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrateEdge, [0, 0, -1], 0, 0)
+  // substrate: both faces are soldermask green, the exposed edge is plated
+  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrate, [0, 0, -1], 0, 'bottom', 0)
   for (let i = 0; i < outline.length; i += 1) {
     const a = outline[i]
     const b = outline[(i + 1) % outline.length]
@@ -405,13 +407,14 @@ function facetsFor(view, opts) {
         [b[0], b[1], th],
         [a[0], a[1], th]
       ],
-      C.substrate,
+      C.substrateEdge,
       n,
       0,
-      2
+      'edge',
+      0
     )
   }
-  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 3)
+  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 'top', 0)
 
   // copper traces as thin plates on each copper side
   for (const layerId of ['F.Cu', 'B.Cu']) {
@@ -439,7 +442,8 @@ function facetsFor(view, opts) {
           color,
           [0, 0, top ? 1 : -1],
           0,
-          top ? 4 : 1
+          top ? 'top' : 'bottom',
+          1
         )
       }
     }
@@ -467,7 +471,8 @@ function facetsFor(view, opts) {
         const ry = lx * Math.sin(rot) + ly * Math.cos(rot)
         pts.push([f.x + rx, f.y + ry, z])
       }
-      pushPoly(pts, color, layerId === 'F.Cu' ? [0, 0, 1] : [0, 0, -1], 0, layerId === 'F.Cu' ? 5 : 1)
+      pushPoly(pts, color, layerId === 'F.Cu' ? [0, 0, 1] : [0, 0, -1], 0,
+               layerId === 'F.Cu' ? 'top' : 'bottom', 2)
     }
   }
 
@@ -490,7 +495,7 @@ function facetsFor(view, opts) {
     const z0 = th + 0.06
     const z1 = z0 + b.z
     const color = PART_COLORS[b.color] || PART_COLORS.default
-    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 6)
+    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3)
     for (let i = 0; i < 4; i += 1) {
       const p = corners[i]
       const q = corners[(i + 1) % 4]
@@ -505,7 +510,8 @@ function facetsFor(view, opts) {
         color,
         n,
         lift,
-        6
+        'top',
+        3
       )
     }
   }
@@ -540,12 +546,15 @@ function drawBoard3D(g, view, opts) {
     return [w / 2 + r[0] * s, h / 2 - r[1] * s, z]
   }
 
-  const light = [0.32, 0.42, 0.85]
+  // Key light sits on the viewer's side of the board; without the flip the
+  // underside of a fully turned board renders as a black silhouette.
+  const undersideLight = Math.cos(opts.pitch || 0) < 0
+  const light = [0.32, 0.42, undersideLight ? -0.85 : 0.85]
   const faces = facetsFor(view, opts)
 
   // Contact shadow: the board reads as a physical object on a surface rather
   // than a floating diagram. Drawn first so every face paints over it.
-  const shadowPts = (view.outline || []).map((p) => project([p[0], p[1], 0]))
+  const shadowPts = undersideLight ? [] : (view.outline || []).map((p) => project([p[0], p[1], 0]))
   if (shadowPts.length > 2 && !shadowPts.some((p) => p === null)) {
     g.save()
     g.beginPath()
@@ -568,16 +577,22 @@ function drawBoard3D(g, view, opts) {
   }
 
   // Fixed paint passes, far-to-near inside each (see facetsFor for why a single
-  // global depth sort cannot order a stack of coplanar sheets).
+  // global depth sort cannot order a stack of coplanar sheets). Turning the board
+  // past vertical puts the camera under it, so the pass sequence is mirrored.
+  const underside = Math.cos(opts.pitch || 0) < 0
+  const sequence = underside
+    ? [['top', 3], ['top', 2], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 2]]
+    : [['bottom', 2], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 2], ['top', 3]]
   const passes = new Map()
   for (const item of prepared) {
-    const key = item.f.order || 0
+    const key = `${item.f.side}:${item.f.rank}`
     if (!passes.has(key)) passes.set(key, [])
     passes.get(key).push(item)
   }
   const ordered = []
-  for (const key of [...passes.keys()].sort((a, b) => a - b)) {
-    ordered.push(...passes.get(key).sort((a, b) => b.depth - a.depth))
+  for (const [side, rank] of sequence) {
+    const bucket = passes.get(`${side}:${rank}`)
+    if (bucket) ordered.push(...bucket.sort((a, b) => b.depth - a.depth))
   }
 
   for (const item of ordered) {
@@ -755,7 +770,9 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       s.yaw = s.drag.yaw + dx * 0.01
       // Drag down raises pitch: the board follows the pointer. The sign was
       // inverted, so vertical drags fought the hand.
-      s.pitch = Math.max(-1.35, Math.min(1.35, s.drag.pitch + dy * 0.008))
+      // A full turn, not a 77-degree tilt: the pass order and the key light flip
+      // once the camera passes under the board (see drawBoard3D).
+      s.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, s.drag.pitch + dy * 0.01))
     }
     draw()
   }

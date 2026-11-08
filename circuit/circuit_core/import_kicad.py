@@ -492,7 +492,9 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
 
         pins: List[dict] = []
         local_pts: List[Point] = []
+        pad_count = 0
         for pad in _children(fp, "pad"):
+            pad_count += 1
             num = str(pad[1]) if len(pad) > 1 and isinstance(pad[1], str) else ""
             ptype = str(pad[2]) if len(pad) > 2 and isinstance(pad[2], str) else "smd"
             pad_at = _child(pad, "at")
@@ -549,6 +551,13 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
                 "points": [[round(p[0], 3), round(p[1], 3)] for p in world_pts],
                 "width": round(width, 3), "kind": "footprint", "ref": ref,
             })
+
+        # A footprint with no pads is a drawing, not a part: ESD signs, logos,
+        # fiducials-as-art. Its silk is already in the silk layer, so emitting a
+        # component here would give the board a body box the size of the graphic
+        # (one sample carried a 92 x 98 mm "component" on a 28 mm wide board).
+        if pad_count == 0:
+            continue
 
         if local_pts:
             xs = [p[0] for p in local_pts]
@@ -618,6 +627,61 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
     if width < 1.0 or height < 1.0:
         raise BoardError(f"{path.name} has a degenerate outline ({width} x {height} mm)")
     frame = _Frame(min_x, max_y)
+
+    # Silkscreen that sits entirely off the board is not part of it — one Olimex
+    # board carries an ESD-sign graphic footprint 60 mm past a 28 mm-wide edge,
+    # which made the whole board render tiny and off-centre. Real fabs clip
+    # silkscreen to the outline; we drop the fully-outside items and keep the rest.
+    silk_margin = 1.0
+    lo_x, hi_x = min_x - silk_margin, max_x + silk_margin
+    lo_y, hi_y = min_y - silk_margin, max_y + silk_margin
+
+    def _inside(pt):
+        return lo_x <= pt[0] <= hi_x and lo_y <= pt[1] <= hi_y
+
+    def _clip_runs(pts):
+        """Keep the maximal on-board runs of a polyline.
+
+        Whole-item filtering is not enough: one board carries an ESD-sign
+        footprint whose silkscreen is a single polyline spanning 60 mm past a
+        28 mm-wide edge, so the item straddles the outline and has to be cut.
+        """
+        runs, run = [], []
+        for pt in pts:
+            if _inside(pt):
+                run.append(pt)
+            else:
+                if len(run) >= 2:
+                    runs.append(run)
+                run = []
+        if len(run) >= 2:
+            runs.append(run)
+        return runs
+
+    dropped_silk = 0
+    for layer in silk_out.values():
+        kept_lines = []
+        for line in layer["lines"]:
+            runs = _clip_runs(line["points"])
+            if not runs:
+                dropped_silk += 1
+                continue
+            if len(runs) == 1 and len(runs[0]) == len(line["points"]):
+                kept_lines.append(line)
+                continue
+            dropped_silk += 1
+            for run in runs:
+                kept_lines.append({**line, "points": run})
+        layer["lines"] = kept_lines
+        kept_text = []
+        for item in layer["text"]:
+            if not any(_inside(pt) for pt in item["points"]):
+                dropped_silk += 1
+                continue
+            kept_text.append(item)
+        layer["text"] = kept_text
+    if dropped_silk:
+        warnings.append(f"{dropped_silk} silkscreen item(s) outside the board outline dropped")
 
     # ---- copper ----------------------------------------------------------
     copper: Dict[str, dict] = {name: {"flashes": [], "draws": []} for name in ("F.Cu", "B.Cu")}

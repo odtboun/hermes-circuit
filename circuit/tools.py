@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -193,9 +194,23 @@ def circuit_board(args: dict, **kwargs) -> str:
 def circuit_import(args: dict, **kwargs) -> str:
     try:
         path = (args.get("path") or "").strip()
-        if not path:
-            return err("path is required — an absolute path to a .kicad_pcb file")
-        result = import_kicad.import_board(path)
+        url = (args.get("url") or "").strip()
+        if not path and not url:
+            return err("path or url is required — an absolute path to a .kicad_pcb file, "
+                       "or an http(s) URL to a raw .kicad_pcb")
+        if url:
+            if not url.lower().startswith(("http://", "https://")):
+                return err("url must start with http:// or https://")
+            name = (url.rsplit("/", 1)[-1] or "board").split("?")[0]
+            if not name.lower().endswith(".kicad_pcb"):
+                name = f"{name or 'board'}.kicad_pcb"
+            with tempfile.TemporaryDirectory(prefix="circuit-import-") as tmp:
+                local = samples.download_board(url, Path(tmp) / name, label=url)
+                # The temp path changes every call; key the project on the URL so a
+                # re-import replaces it instead of piling up -2 copies.
+                result = import_kicad.import_board(str(local), source=url)
+        else:
+            result = import_kicad.import_board(path)
         return ok(**result,
                   next=["circuit_view — open the imported board in the viewer",
                         "circuit_boards — list every project"])

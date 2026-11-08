@@ -156,3 +156,85 @@ def test_view_document_matches_the_view_model_shape():
     assert set(doc["components"][0]) == set(reference["components"][0])
     assert set(doc["components"][0]["body"]) == set(reference["components"][0]["body"])
     assert set(doc["components"][0]["pins"][0]) == set(reference["components"][0]["pins"][0])
+
+
+# --------------------------------------------------------------------------- #
+# url imports
+# --------------------------------------------------------------------------- #
+def test_import_from_url_downloads_then_parses(monkeypatch):
+    # conftest puts both the repo root and circuit/ on sys.path, so the same file
+    # is importable as `circuit.circuit_core.samples` and `circuit_core.samples`.
+    # tools.py uses the package path — patch that object.
+    from circuit.circuit_core import samples
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
+    url = "https://example.test/hw/board.kicad_pcb"
+
+    def fake_download(url_arg, dest, label=None):
+        assert url_arg == url
+        dest.write_bytes(fixture.read_bytes())
+        return dest
+
+    monkeypatch.setattr(samples, "download_board", fake_download)
+    out = call("circuit_import", url=url)
+    assert out["ok"] is True
+    assert out["components"] == 2
+    assert out["read_only"] is True
+
+    # same url again -> same project, not board-2
+    again = call("circuit_import", url=url)
+    assert again["board"] == out["board"]
+    assert [b["slug"] for b in json.loads(HANDLERS["circuit_boards"]({}))["boards"]] == [out["board"]]
+
+
+def test_import_rejects_a_non_http_url():
+    out = call("circuit_import", url="file:///etc/passwd")
+    assert out["ok"] is False
+    assert "http" in out["error"]
+
+
+def test_import_needs_a_path_or_a_url():
+    out = call("circuit_import")
+    assert out["ok"] is False
+    assert "path or url" in out["error"]
+
+
+def test_offboard_silkscreen_is_clipped_and_graphic_footprints_are_not_parts(tmp_path):
+    """A logo/ESD graphic is silkscreen, not a component, and silk is clipped."""
+    board = """(kicad_pcb
+  (version 20221018)
+  (generator pcbnew)
+  (general (thickness 1.6))
+  (layers
+    (0 "F.Cu" signal)
+    (31 "B.Cu" signal)
+    (37 "F.SilkS" user "F.Silkscreen")
+    (38 "B.SilkS" user "B.Silkscreen")
+    (44 "Edge.Cuts" user)
+  )
+  (net 0 "")
+  (gr_rect (start 0 0) (end 20 10) (stroke (width 0.1) (type solid)) (layer "Edge.Cuts"))
+  (footprint "Demo:Part" (layer "F.Cu") (at 5 5)
+    (fp_text reference "U1" (at 0 -2) (layer "F.SilkS"))
+    (fp_line (start -1 -1) (end 1 1) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+    (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu" "F.Mask"))
+  )
+  (footprint "Demo:Logo" (layer "B.Cu") (at 40 5)
+    (fp_text reference "LOGO" (at 0 0) (layer "B.SilkS"))
+    (fp_line (start -5 -5) (end 60 5) (stroke (width 0.15) (type solid)) (layer "B.SilkS"))
+  )
+)
+"""
+    path = tmp_path / "clip.kicad_pcb"
+    path.write_text(board)
+
+    parsed, doc, warnings = import_kicad.parse_board(path)
+    refs = [c["ref"] for c in doc["components"]]
+    assert refs == ["U1"], "a padless graphic footprint must not become a component"
+    assert any("silkscreen" in w for w in warnings)
+
+    for layer in doc["silk"].values():
+        for item in layer["lines"] + layer["text"]:
+            for x, y in item["points"]:
+                assert -1.5 <= x <= 21.5, f"silk point {x},{y} left the board"
+                assert -1.5 <= y <= 11.5
