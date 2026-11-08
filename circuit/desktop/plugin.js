@@ -367,7 +367,11 @@ function drawBoard2D(g, view, opts) {
     g.globalAlpha = 1
   }
 
-  if (layers.bottom) drawCopper('B.Cu', C.traceBottom, C.padBottom, 0.75)
+  // Opaque, like the top. The bottom side used to be drawn at 75% alpha so both
+  // sides were visible at once, but a see-through trace reads as a rendering
+  // bug; the darker bottom colours already separate the two sides, and the
+  // layer chips hide either side outright.
+  if (layers.bottom) drawCopper('B.Cu', C.traceBottom, C.padBottom, 1)
   if (layers.top) drawCopper('F.Cu', C.trace, C.pad, 1)
 
   if (layers.silk) {
@@ -376,7 +380,9 @@ function drawBoard2D(g, view, opts) {
       if (!layer) continue
       g.strokeStyle = key === 'B.SilkS' ? '#9aa39c' : C.silk
       g.lineWidth = Math.max(0.1, px * 0.9)
-      g.globalAlpha = key === 'B.SilkS' ? 0.55 : 0.95
+      // 0.55 alpha on bottom silk was the other see-through element: silk is
+      // printed ink, it is opaque from either side.
+      g.globalAlpha = 1
       for (const ln of layer.lines) {
         drawPath(g, ln.points, false)
         g.stroke()
@@ -1468,13 +1474,22 @@ function BoardPage({ ctx }) {
       jsx('div', { style: { fontSize: 14, fontWeight: 650, color: UI.text }, children: view ? view.title : 'Circuit' }),
       view ? jsx('span', { style: { fontSize: 11.5, color: UI.faint }, children: `${view.board.width} × ${view.board.height} mm · ${view.board.layers} layer · ${view.board.thickness} mm` }) : null,
       view ? jsx(DrcBadge, { drc: view.drc }) : null,
+      view && view.imported ? jsx(Badge, { variant: 'muted', children: 'imported · read-only' }) : null,
       jsx('div', { style: { flex: 1 } }),
       note ? jsx('span', { style: { fontSize: 11.5, color: UI.dim }, children: note }) : null,
       jsxs('div', { style: { display: 'flex', gap: 4, ...panel, padding: 3 }, children: [
         chip('2D', mode === '2d', () => setMode('2d')),
         chip('3D', mode === '3d', () => setMode('3d'))
       ] }),
-      jsx(Button, { variant: 'secondary', size: 'sm', disabled: busy || !slug, onClick: rebuild, children: busy ? 'Rebuilding…' : 'Rebuild' })
+      // An imported board has no engine part ids to re-place or re-route, and the
+      // endpoint answers 409 — do not offer the button at all.
+      jsx(Button, {
+        variant: 'secondary',
+        size: 'sm',
+        disabled: busy || !slug || Boolean(view && view.imported),
+        onClick: rebuild,
+        children: busy ? 'Rebuilding…' : view && view.imported ? 'Read-only' : 'Rebuild'
+      })
     ]
   })
 

@@ -51,6 +51,8 @@ def view_model(board: Board, files: Optional[Dict[str, dict]] = None) -> dict:
     drills = layers.drills(board)
     return {
         "slug": board.data.get("slug", ""),
+        # Imported boards carry True here; the viewer reads one shape either way.
+        "imported": bool(board.data.get("imported")),
         "title": board.data["title"],
         "schema": 1,
         "board": {

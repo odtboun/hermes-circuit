@@ -89,6 +89,13 @@ def rebuild(slug: str):
         board = store.load(slug)
     except BoardError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if board.data.get("imported"):
+        # An imported board has no engine part ids and no route table: the router
+        # would raise KeyError('unknown part …') and the UI would show a 500.
+        raise HTTPException(
+            status_code=409,
+            detail="this board was imported from KiCad and is read-only — there is nothing to rebuild",
+        )
     if any(c.get("x") is None for c in board.data["components"]):
         placement.auto_place(board)
     result = autorouter.route_board(board)
@@ -105,6 +112,10 @@ def board_view(slug: str):
     """Fresh view model (bypasses the cached view.json)."""
     try:
         board = store.load(slug)
+        if board.data.get("imported"):
+            # view_model() walks the engine part library, which an imported board
+            # has no ids for; its stored view document is the view model.
+            return JSONResponse(store.load_view(slug))
+        return JSONResponse(view.view_model(board))
     except BoardError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return JSONResponse(view.view_model(board))

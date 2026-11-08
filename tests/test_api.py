@@ -1,6 +1,7 @@
 """The plugin backend routes, loaded the way Hermes loads them."""
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -75,3 +76,24 @@ def test_file_endpoint_serves_exports_only(client):
 def test_unknown_board_is_404(client):
     client = client[0]
     assert client.get("/api/plugins/circuit/boards/nope").status_code == 404
+
+
+def test_rebuild_on_an_imported_board_is_a_409_not_a_500(tmp_path):
+    """The router cannot route a board whose parts are not in the library."""
+    from fastapi import HTTPException
+
+    from circuit.dashboard import plugin_api
+    from circuit_core import import_kicad
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
+    slug = import_kicad.import_board(str(fixture))["board"]
+
+    with pytest.raises(HTTPException) as exc:
+        plugin_api.rebuild(slug)
+    assert exc.value.status_code == 409
+    assert "read-only" in exc.value.detail
+
+    # and the fresh-view route must serve the stored document instead of raising
+    body = json.loads(plugin_api.board_view(slug).body)
+    assert body["imported"] is True
+    assert body["stats"]["components"] == 2

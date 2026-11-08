@@ -866,6 +866,7 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         "slug": "",
         "title": title,
         "schema": 1,
+        "imported": True,
         "board": dict(board_data["board"]),
         "rules": dict(DEFAULT_RULES),
         "outline": frame.points(outline),
