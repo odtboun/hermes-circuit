@@ -42,6 +42,23 @@ pick-and-place.
    ::circuit{board="pico-blinky"}
    ```
 
+## Opening an existing KiCad board (read-only)
+
+`circuit_import` takes an absolute path to a `.kicad_pcb` (KiCad 6/7/8 and
+newer) and stores it as a project: Edge.Cuts outline, footprints, pads, tracks,
+vias and nets go straight into the viewer. Nothing is placed, routed or DRC'd,
+and every editing tool refuses the project. Re-importing the same file replaces
+that project; a different file with the same name gets a `-2` slug. Follow it
+with `circuit_view` to render it.
+
+`circuit_samples` is the no-path version: `action="list"` shows real open-source
+KiCad boards (63-309 footprints) and `action="load"` with an `id` downloads one
+from the upstream KiCad demo repository and imports it read-only. Use it when the
+user wants to see what the viewer does with a dense board, or wants a reference
+design to compare against — the bundled templates are only 8-13 parts. Loads need
+network; multi-layer samples are flattened to 2 copper layers and say so in
+`warnings`.
+
 ## Design rules the engine enforces
 
 - **2 layers only**, 1.6 mm FR4 by default, HASL, green mask.
@@ -112,6 +129,8 @@ count so they can price it; do not invent numbers.
 - `reference R4 already used` → omit `ref` and let the engine assign one.
 - `board is corrupt` → the project JSON is unreadable; create a new board rather
   than editing the file by hand.
+- `read-only` → the board came from `circuit_import`; `circuit_create` a new
+  board if the user wants to edit it.
 - Desktop half missing → the inline directive renders as plain text. Use the
   `preview_directive` (an HTML file) or tell the user to enable **Circuit** in
   Settings → Plugins.

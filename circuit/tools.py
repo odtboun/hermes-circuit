@@ -10,7 +10,7 @@ from typing import Dict, Optional
 from . import settings
 from .circuit_core import compile as builder
 from .circuit_core import drc as drc_mod
-from .circuit_core import import_kicad, placement, router, store, templates, view
+from .circuit_core import import_kicad, placement, router, samples, store, templates, view
 from .circuit_core.lib import parts
 from .circuit_core.project import Board, BoardError
 
@@ -203,6 +203,27 @@ def circuit_import(args: dict, **kwargs) -> str:
         return err(exc)
 
 
+def circuit_samples(args: dict, **kwargs) -> str:
+    try:
+        action = (args.get("action") or "list").strip().lower()
+        if action in ("", "list"):
+            rows = samples.names()
+            return ok(samples=rows, count=len(rows),
+                      hint="circuit_samples action=load id=<sample> downloads and imports it "
+                           "read-only (needs network); then circuit_view to render it.")
+        if action == "load":
+            sample_id = (args.get("id") or "").strip()
+            if not sample_id:
+                return err("id is required for action=load — see circuit_samples action=list")
+            result = samples.load(sample_id)
+            return ok(**result,
+                      next=["circuit_view — open the imported board in the viewer",
+                            "circuit_boards — list every project"])
+        return err(f"unknown action {action!r} (use 'list' or 'load')")
+    except Exception as exc:
+        return err(exc)
+
+
 def circuit_add_part(args: dict, **kwargs) -> str:
     try:
         board = _writable(_board(args))
@@ -374,6 +395,7 @@ HANDLERS = {
     "circuit_create": circuit_create,
     "circuit_boards": circuit_boards,
     "circuit_import": circuit_import,
+    "circuit_samples": circuit_samples,
     "circuit_board": circuit_board,
     "circuit_add_part": circuit_add_part,
     "circuit_connect": circuit_connect,

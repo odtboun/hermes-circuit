@@ -771,6 +771,10 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         } for comp in comps],
         "nets": net_doc,
         "routes": {},
+        # The sidebar/`circuit_boards` summary reads `routes` for its "routed"
+        # count; imported traces live in the view document, so record the count
+        # here instead of reporting 0/N for a fully routed imported board.
+        "routed_nets": sum(1 for n in nets if n.get("routed")),
         "vias": [],
         "imported": True,
         "meta": {"generator": "circuit", "version": 1, "format": "kicad",

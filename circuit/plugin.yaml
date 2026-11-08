@@ -13,6 +13,7 @@ provides_tools:
   - circuit_create
   - circuit_boards
   - circuit_import
+  - circuit_samples
   - circuit_board
   - circuit_add_part
   - circuit_connect

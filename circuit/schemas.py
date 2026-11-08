@@ -78,6 +78,27 @@ BOARD = {
     "parameters": {"type": "object", "properties": {"board": BOARD_ARG}},
 }
 
+SAMPLES = {
+    "name": "circuit_samples",
+    "description": (
+        "Browse and load bundled sample boards: real open-source KiCad designs (up to 309 "
+        "footprints) that are downloaded from the upstream KiCad demo repository and imported "
+        "read-only, so the viewer has something genuinely complex to render. action='list' "
+        "shows the catalogue; action='load' with an id fetches and imports one (needs network)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "load"], "default": "list",
+                       "description": "'list' the catalogue (default) or 'load' one sample."},
+            "id": {"type": "string",
+                   "description": "Sample id from action='list', e.g. 'tiny-tapeout'."},
+        },
+        "required": [],
+    },
+}
+
+
 ADD_PART = {
     "name": "circuit_add_part",
     "description": (
@@ -227,5 +248,5 @@ VIEW = {
     },
 }
 
-ALL = [CATALOG, CREATE, BOARDS, IMPORT, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW]
+ALL = [CATALOG, CREATE, BOARDS, IMPORT, SAMPLES, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW]
 NAMES = [s["name"] for s in ALL]

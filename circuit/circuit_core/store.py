@@ -129,7 +129,7 @@ def list_boards() -> List[dict]:
             "updated": data.get("updated") or "",
             "components": len(comps),
             "nets": len(data.get("nets") or {}),
-            "routed": len(data.get("routes") or {}),
+            "routed": data.get("routed_nets", len(data.get("routes") or {})),
             "board": data.get("board", {}),
             "drc_ok": (data.get("drc") or {}).get("ok"),
             "thumb": (d / "exports" / "preview.svg").exists(),
