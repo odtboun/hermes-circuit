@@ -27,21 +27,21 @@ const ID = 'circuit'
 const ROUTE = '/circuit'
 
 // Physical board colours (a PCB is green/copper regardless of the app theme).
-// Reads as a real HASL board: green mask over the copper, gold-exposed pads,
-// warm off-white silk. Traces are NOT bare copper — under mask they read as a
-// lighter green than the substrate, which is what makes a render look like a
-// board instead of an orange drawing.
+// Tuned against real reference renders: a saturated green mask (not near-black),
+// yellow-gold exposed copper, warm white silk. Traces are NOT bare copper — under
+// mask they read as a lighter green than the substrate, which is what makes a
+// render look like a fabricated board instead of an orange drawing.
 const C = {
-  substrate: '#0c3a29',
-  substrateEdge: '#d8b877',
-  trace: '#2f7d5b',
-  traceBottom: '#255f47',
-  pad: '#dcb862',
-  padBottom: '#a98f4e',
-  silk: '#f2ecdc',
+  substrate: '#14663a',
+  substrateEdge: '#e0be6a',
+  trace: '#4a9e70',
+  traceBottom: '#2b6b4a',
+  pad: '#f0d24a',
+  padBottom: '#b8983c',
+  silk: '#f6f2e6',
   drill: '#08110d',
   mask: '#0a3123',
-  gold: '#dcb862',
+  gold: '#f0d24a',
   body: '#1b2320',
   bodyEdge: '#39443d'
 }
@@ -213,6 +213,13 @@ function drawBoard2D(g, view, opts) {
   // substrate
   drawPath(g, view.outline, true)
   g.fillStyle = C.substrate
+  // soft halo so the board lifts off the background instead of sitting flat —
+  // the same trick reference renders get from layered drop-shadows
+  g.save()
+  g.shadowColor = 'rgba(126, 226, 176, 0.30)'
+  g.shadowBlur = 26
+  g.fill()
+  g.restore()
   g.fill()
   // soft key-light falloff across the mask so a sparse board still reads as a
   // surface rather than a flat green fill (lighting only — no fake copper)
@@ -255,6 +262,17 @@ function drawBoard2D(g, view, opts) {
       g.fillStyle = hot ? UI.accent : padColor
       padPath(g, f)
       g.fill()
+      // Metal vs dielectric: plated copper gets a specular streak, the mask
+      // stays glossy-but-diffuse. Only above ~5 px/mm, below that it is noise.
+      if (!hot && t.k > 5) {
+        g.save()
+        g.globalAlpha = 0.32
+        g.fillStyle = '#fffdf2'
+        g.beginPath()
+        g.arc(f.x - f.w * 0.12, f.y + f.h * 0.12, Math.max(0.08, Math.min(f.w, f.h) * 0.22), 0, Math.PI * 2)
+        g.fill()
+        g.restore()
+      }
     }
     g.globalAlpha = 1
   }
@@ -357,18 +375,25 @@ function facetsFor(view, opts) {
   const outline = view.outline || []
   const lift = opts.explode ? 6 : 0
 
-  const pushPoly = (pts3, color, normalHint, liftAmount = 0) => {
+  const pushPoly = (pts3, color, normalHint, liftAmount = 0, order = 0) => {
     if (!pts3 || pts3.length < 3) return
     faces.push({
       pts: pts3.map((p) => [p[0], p[1], p[2] + liftAmount]),
       color,
-      n: normalHint
+      n: normalHint,
+      order
     })
   }
 
-  // substrate: top, bottom, sides
-  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrateEdge, [0, 0, -1])
-  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1])
+  // `order` is the paint pass, not a depth. A 2-layer board is a stack of
+  // near-coplanar sheets (bottom, sides, top, traces, pads, bodies); sorting the
+  // whole set by average depth cannot order those — a far pad ends up "behind"
+  // the single big top face and gets buried. The orbit never goes under the
+  // board (pitch is clamped, camera stays on +z), so a fixed stack is correct
+  // for every reachable angle and only the bodies need a real depth sort.
+
+  // substrate: bottom, sides, top
+  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrateEdge, [0, 0, -1], 0, 0)
   for (let i = 0; i < outline.length; i += 1) {
     const a = outline[i]
     const b = outline[(i + 1) % outline.length]
@@ -381,8 +406,43 @@ function facetsFor(view, opts) {
         [a[0], a[1], th]
       ],
       C.substrate,
-      n
+      n,
+      0,
+      2
     )
+  }
+  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 3)
+
+  // copper traces as thin plates on each copper side
+  for (const layerId of ['F.Cu', 'B.Cu']) {
+    const layer = view.copper[layerId]
+    if (!layer) continue
+    const top = layerId === 'F.Cu'
+    const z = top ? th + 0.01 : -0.01
+    const color = top ? C.trace : C.traceBottom
+    for (const d of layer.draws) {
+      const pts = d.points || []
+      const hw = Math.max(d.width || 0.2, 0.05) / 2
+      for (let i = 0; i < pts.length - 1; i += 1) {
+        const [x1, y1] = pts[i]
+        const [x2, y2] = pts[i + 1]
+        const len = Math.hypot(x2 - x1, y2 - y1) || 1e-6
+        const nx = (-(y2 - y1) / len) * hw
+        const ny = ((x2 - x1) / len) * hw
+        pushPoly(
+          [
+            [x1 + nx, y1 + ny, z],
+            [x2 + nx, y2 + ny, z],
+            [x2 - nx, y2 - ny, z],
+            [x1 - nx, y1 - ny, z]
+          ],
+          color,
+          [0, 0, top ? 1 : -1],
+          0,
+          top ? 4 : 1
+        )
+      }
+    }
   }
 
   // pads as thin plates on both copper sides
@@ -407,7 +467,7 @@ function facetsFor(view, opts) {
         const ry = lx * Math.sin(rot) + ly * Math.cos(rot)
         pts.push([f.x + rx, f.y + ry, z])
       }
-      pushPoly(pts, color, layerId === 'F.Cu' ? [0, 0, 1] : [0, 0, -1])
+      pushPoly(pts, color, layerId === 'F.Cu' ? [0, 0, 1] : [0, 0, -1], 0, layerId === 'F.Cu' ? 5 : 1)
     }
   }
 
@@ -430,7 +490,7 @@ function facetsFor(view, opts) {
     const z0 = th + 0.06
     const z1 = z0 + b.z
     const color = PART_COLORS[b.color] || PART_COLORS.default
-    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift)
+    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 6)
     for (let i = 0; i < 4; i += 1) {
       const p = corners[i]
       const q = corners[(i + 1) % 4]
@@ -444,7 +504,8 @@ function facetsFor(view, opts) {
         ],
         color,
         n,
-        lift
+        lift,
+        6
       )
     }
   }
@@ -468,7 +529,12 @@ function drawBoard3D(g, view, opts) {
 
   const project = (p) => {
     const r = rotate([p[0] - cx, p[1] - cy, p[2] - (view.board.thickness || 1.6) / 2])
-    const z = r[2] + dist
+    // Camera on the +z side, looking down -z. With `dist + r[2]` the camera sat
+    // BELOW the board, so the bottom face (z=0) was always nearer than the top
+    // face (z=th) and painter-sorted over it — the whole top surface, its pads
+    // and every component body were painted and then buried. The board rendered
+    // as a bare gold slab with parts missing.
+    const z = dist - r[2]
     if (z <= 0.2) return null
     const s = fov / z
     return [w / 2 + r[0] * s, h / 2 - r[1] * s, z]
@@ -500,16 +566,32 @@ function drawBoard3D(g, view, opts) {
     const depth = pts.reduce((acc, p) => acc + p[2], 0) / pts.length
     prepared.push({ f, pts, depth })
   }
-  prepared.sort((a, b) => b.depth - a.depth)
 
+  // Fixed paint passes, far-to-near inside each (see facetsFor for why a single
+  // global depth sort cannot order a stack of coplanar sheets).
+  const passes = new Map()
   for (const item of prepared) {
+    const key = item.f.order || 0
+    if (!passes.has(key)) passes.set(key, [])
+    passes.get(key).push(item)
+  }
+  const ordered = []
+  for (const key of [...passes.keys()].sort((a, b) => a - b)) {
+    ordered.push(...passes.get(key).sort((a, b) => b.depth - a.depth))
+  }
+
+  for (const item of ordered) {
     const { f, pts } = item
     const n = f.n || [0, 0, 1]
     const rn = rotate(n)
-    const lambert = Math.max(0, rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2])
+    // Normals arrive in board units, not normalized (a side face carries
+    // [dy, -dx, 0], magnitude ~20 mm), so the raw dot product reached 5-7 and
+    // every side face saturated to pure white over the pads and part bodies.
+    const len = Math.hypot(rn[0], rn[1], rn[2]) || 1
+    const lambert = Math.max(0, (rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2]) / len)
     // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
     // into near-black, which read as "empty" next to reference renders.
-    const shade = 0.62 + 0.38 * lambert
+    const shade = 0.68 + 0.32 * lambert
     g.beginPath()
     g.moveTo(pts[0][0], pts[0][1])
     for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0], pts[i][1])

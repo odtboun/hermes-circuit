@@ -10,7 +10,7 @@ from typing import Dict, Optional
 from . import settings
 from .circuit_core import compile as builder
 from .circuit_core import drc as drc_mod
-from .circuit_core import placement, router, store, templates, view
+from .circuit_core import import_kicad, placement, router, store, templates, view
 from .circuit_core.lib import parts
 from .circuit_core.project import Board, BoardError
 
@@ -35,6 +35,38 @@ def _board(args: dict) -> Board:
     if not slug:
         raise BoardError("no boards yet — call circuit_create first")
     return store.load(slug)
+
+
+def _writable(board: Board) -> Board:
+    """Imported KiCad boards are a picture, not a project: refuse edits."""
+    if board.data.get("imported"):
+        raise BoardError(
+            f"board {board.data.get('slug')!r} is an imported KiCad design (read-only) — "
+            "call circuit_create to start an editable board")
+    return board
+
+
+def _imported_summary(board: Board) -> dict:
+    doc = store.load_view(board.data.get("slug") or "")
+    return {
+        "board": board.data.get("slug"),
+        "title": doc.get("title"),
+        "imported": True,
+        "size_mm": [doc["board"]["width"], doc["board"]["height"]],
+        "layers": doc["board"]["layers"],
+        "components": [
+            {"ref": c["ref"], "part": c["part"], "value": c["value"],
+             "pins": len(c["pins"]), "placed": True}
+            for c in doc["components"][:MAX_COMPONENTS_IN_OUTPUT]
+        ],
+        "component_count": len(doc["components"]),
+        "nets": [{"name": n["name"], "class": n["class"], "pads": len(n["pins"]),
+                  "routed": n["routed"]} for n in doc["nets"]],
+        "stats": doc["stats"],
+        "erc": doc.get("erc"),
+        "note": "imported from KiCad — read-only, not routed or checked by this engine",
+        "next": ["circuit_view — open the imported board in the viewer"],
+    }
 
 
 def _persist(board: Board) -> dict:
@@ -151,14 +183,29 @@ def circuit_boards(args: dict, **kwargs) -> str:
 def circuit_board(args: dict, **kwargs) -> str:
     try:
         board = _board(args)
+        if board.data.get("imported"):
+            return ok(**_imported_summary(board))
         return ok(**_summary(board, routed=bool(board.data["routes"])))
+    except Exception as exc:
+        return err(exc)
+
+
+def circuit_import(args: dict, **kwargs) -> str:
+    try:
+        path = (args.get("path") or "").strip()
+        if not path:
+            return err("path is required — an absolute path to a .kicad_pcb file")
+        result = import_kicad.import_board(path)
+        return ok(**result,
+                  next=["circuit_view — open the imported board in the viewer",
+                        "circuit_boards — list every project"])
     except Exception as exc:
         return err(exc)
 
 
 def circuit_add_part(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         part_id = (args.get("part") or "").strip()
         comp = board.add_component(part_id, nets=args.get("nets") or {},
                                    ref=(args.get("ref") or None),
@@ -178,7 +225,7 @@ def circuit_add_part(args: dict, **kwargs) -> str:
 
 def circuit_connect(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         groups = args.get("connections") or []
         if not isinstance(groups, list) or not groups:
             return err("connections must be a non-empty list of pin groups")
@@ -203,7 +250,7 @@ def circuit_connect(args: dict, **kwargs) -> str:
 
 def circuit_remove_part(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         ref = (args.get("ref") or "").strip().upper()
         board.remove_component(ref)
         _persist(board)
@@ -214,7 +261,7 @@ def circuit_remove_part(args: dict, **kwargs) -> str:
 
 def circuit_place(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         positions = args.get("positions") or []
         if positions:
             for pos in positions:
@@ -242,7 +289,7 @@ def circuit_place(args: dict, **kwargs) -> str:
 
 def circuit_route(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         if any(c.get("x") is None for c in board.data["components"]):
             placement.auto_place(board)
         result = router.route_board(board, effort=args.get("effort") or settings.get("effort"))
@@ -261,7 +308,7 @@ def circuit_route(args: dict, **kwargs) -> str:
 
 def circuit_check(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         erc = board.erc()
         result = drc_mod.check(board)
         board.data["drc"] = result
@@ -275,7 +322,7 @@ def circuit_check(args: dict, **kwargs) -> str:
 
 def circuit_export(args: dict, **kwargs) -> str:
     try:
-        board = _board(args)
+        board = _writable(_board(args))
         route = args.get("route")
         do_route = True if route is None else bool(route)
         do_route = do_route and (not board.data["routes"]
@@ -299,8 +346,8 @@ def circuit_export(args: dict, **kwargs) -> str:
 def circuit_view(args: dict, **kwargs) -> str:
     try:
         board = _board(args)
-        slug = board.data.get("slug")
-        doc = _persist(board)
+        slug = board.data.get("slug") or ""
+        doc = store.load_view(slug) if board.data.get("imported") else _persist(board)
         ex = store.project_dir(slug) / "exports"
         preview = ex / "preview.html"
         payload = {
@@ -326,6 +373,7 @@ HANDLERS = {
     "circuit_catalog": circuit_catalog,
     "circuit_create": circuit_create,
     "circuit_boards": circuit_boards,
+    "circuit_import": circuit_import,
     "circuit_board": circuit_board,
     "circuit_add_part": circuit_add_part,
     "circuit_connect": circuit_connect,

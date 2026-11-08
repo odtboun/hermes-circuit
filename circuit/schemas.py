@@ -51,6 +51,24 @@ BOARDS = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+IMPORT = {
+    "name": "circuit_import",
+    "description": (
+        "Open an existing KiCad board (.kicad_pcb, KiCad 6/7/8 and newer) as a read-only Circuit "
+        "project so it can be inspected and rendered in the viewer. The board is parsed as-is: "
+        "Edge.Cuts outline, footprints, pads, tracks, vias and nets become a view document — nothing "
+        "is re-placed, re-routed or design-rule checked. Returns the new board id. Re-importing the "
+        "same file replaces that project."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Absolute path to a .kicad_pcb file."},
+        },
+        "required": ["path"],
+    },
+}
+
 BOARD = {
     "name": "circuit_board",
     "description": (
@@ -209,5 +227,5 @@ VIEW = {
     },
 }
 
-ALL = [CATALOG, CREATE, BOARDS, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW]
+ALL = [CATALOG, CREATE, BOARDS, IMPORT, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW]
 NAMES = [s["name"] for s in ALL]

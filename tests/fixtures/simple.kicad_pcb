@@ -1,0 +1,196 @@
+(kicad_pcb
+	(version 20221018)
+	(generator pcbnew)
+	(general
+		(thickness 1.6)
+	)
+	(paper "A4")
+	(title_block
+		(title "Import fixture")
+	)
+	(layers
+		(0 "F.Cu" signal)
+		(31 "B.Cu" signal)
+		(37 "F.SilkS" user "F.Silkscreen")
+		(38 "B.SilkS" user "B.Silkscreen")
+		(44 "Edge.Cuts" user)
+	)
+	(net 0 "")
+	(net 1 "GND")
+	(net 2 "+3V3")
+	(net 3 "SIG")
+	(footprint "Resistor_SMD:R_0805_2012Metric"
+		(layer "F.Cu")
+		(uuid "11111111-1111-1111-1111-111111111111")
+		(at 110 110)
+		(fp_text reference "R1"
+			(at 0 -1.65)
+			(layer "F.SilkS")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(fp_text value "10k"
+			(at 0 1.65)
+			(layer "F.Fab")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(fp_line
+			(start -1 -0.7)
+			(end 1 -0.7)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+		)
+		(fp_line
+			(start -1 0.7)
+			(end 1 0.7)
+			(stroke
+				(width 0.12)
+				(type solid)
+			)
+			(layer "F.SilkS")
+		)
+		(pad "1" smd roundrect
+			(at -0.9125 0)
+			(size 1.025 1.4)
+			(layers "F.Cu" "F.Paste" "F.Mask")
+			(roundrect_rratio 0.243902)
+			(net 3 "SIG")
+		)
+		(pad "2" smd roundrect
+			(at 0.9125 0)
+			(size 1.025 1.4)
+			(layers "F.Cu" "F.Paste" "F.Mask")
+			(roundrect_rratio 0.243902)
+			(net 1 "GND")
+		)
+	)
+	(footprint "Package_DIP:DIP-8_W7.62mm"
+		(layer "F.Cu")
+		(uuid "22222222-2222-2222-2222-222222222222")
+		(at 125 120 90)
+		(fp_text reference "U1"
+			(at 0 -4.5)
+			(layer "F.SilkS")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(fp_text value "NE555"
+			(at 0 4.5)
+			(layer "F.Fab")
+			(effects
+				(font
+					(size 1 1)
+					(thickness 0.15)
+				)
+			)
+		)
+		(pad "1" thru_hole circle
+			(at -3.81 -2.54 90)
+			(size 1.6 1.6)
+			(drill 0.8)
+			(layers "*.Cu" "*.Mask")
+			(net 2 "+3V3")
+		)
+		(pad "2" thru_hole circle
+			(at 3.81 -2.54 90)
+			(size 1.6 1.6)
+			(drill 0.8)
+			(layers "*.Cu" "*.Mask")
+			(net 3 "SIG")
+		)
+		(pad "3" thru_hole circle
+			(at -3.81 2.54 90)
+			(size 1.6 1.6)
+			(drill 0.8)
+			(layers "*.Cu" "*.Mask")
+			(net 1 "GND")
+		)
+		(pad "4" thru_hole circle
+			(at 3.81 2.54 90)
+			(size 1.6 1.6)
+			(drill 0.8)
+			(layers "*.Cu" "*.Mask")
+			(net 3 "SIG")
+		)
+	)
+	(gr_line
+		(start 100 100)
+		(end 140 100)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "Edge.Cuts")
+	)
+	(gr_line
+		(start 140 100)
+		(end 140 130)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "Edge.Cuts")
+	)
+	(gr_line
+		(start 140 130)
+		(end 100 130)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "Edge.Cuts")
+	)
+	(gr_line
+		(start 100 130)
+		(end 100 100)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(layer "Edge.Cuts")
+	)
+	(segment
+		(start 109.0875 110)
+		(end 112 110)
+		(width 0.25)
+		(layer "F.Cu")
+		(net 3)
+	)
+	(segment
+		(start 112 110)
+		(end 118 110)
+		(width 0.25)
+		(layer "F.Cu")
+		(net 3)
+	)
+	(segment
+		(start 110 111)
+		(end 118 111)
+		(width 0.4)
+		(layer "B.Cu")
+		(net 1)
+	)
+	(via
+		(at 118 110)
+		(size 0.8)
+		(drill 0.4)
+		(layers "F.Cu" "B.Cu")
+		(net 3)
+	)
+)
