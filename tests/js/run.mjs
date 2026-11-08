@@ -167,6 +167,95 @@ assert.ok(r2.calls.stroke > 20)
 const bodies = view.components.filter((c) => c.body && c.body.w > 0 && c.body.h > 0).length
 assert.ok(r2.calls.fillText >= bodies, `every part with a body gets a designator (${r2.calls.fillText}/${bodies})`)
 
+// ---- package geometry ----------------------------------------------------- //
+// The family table is the whole point of the procedural 3D: a SOT-23 is 1.1 mm
+// tall and a 0402 is 0.5 mm, and getting those wrong is what made every part
+// look like the same slab. Each case below is a real footprint from a real board.
+const mkComp = (footprint, pins, extra = {}) => ({
+  ref: 'U1',
+  footprint,
+  part: `kicad:${footprint}`,
+  value: '',
+  body: { w: 4, h: 3, z: 0.45, color: 'default' },
+  x: 10,
+  y: 10,
+  rot: 0,
+  pins: pins || [],
+  ...extra
+})
+const pkg = (fp, pins, extra) => __test__.parsePackage(mkComp(fp, pins, extra))
+
+const cases = [
+  ['CM5IO:SOT-23-6', 'sot23', 1.1],
+  ['CM5IO:SOT-416', 'sot323', 0.9],
+  ['Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', 'soic', 1.6],
+  ['Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm', 'qfn', 0.9],
+  ['Package_TO_SOT_SMD:SOT-223-3_TabPin2', 'sot223', 1.8],
+  ['Capacitor_SMD:C_0402_1005Metric', 'chip', 0.5],
+  ['Capacitor_SMD:C_0603_1608Metric', 'chip', 0.55],
+  ['Capacitor_SMD:C_0805_2012Metric', 'chip', 0.6],
+  ['Resistor_SMD:R_1206_3216Metric', 'chip', 0.65],
+  ['Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B', 'tantalum', 1.9],
+  ['Capacitor_THT:CP_Radial_D8.0mm_P3.50mm', 'electrolytic', 6],
+  ['Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm', 'crystal', 0.8],
+  ['Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12', 'usb-c', 3.3],
+  ['Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', 'header', 2.5],
+  ['Package_DIP:DIP-8_W7.62mm', 'dip', 4],
+  ['LED_SMD:LED_0603_1608Metric', 'led', 0.6],
+  ['Relay_THT:Relay_SPDT_SANYOU_SRD_Series_Form_C', 'relay', 15],
+  ['MountingHole:MountingHole_3.2mm_M3_Pad', 'hole', 0],
+  ['flyingcarsfootprints:StitchingVia-0.3mm', 'via', 0],
+  ['TinyTapeout:SolderJumper-2_Bridged_Throughole1', 'flat', 0]
+]
+for (const [fp, family, z] of cases) {
+  const prof = pkg(fp)
+  assert.equal(prof.family, family, `${fp} -> family ${family} (got ${prof.family})`)
+  assert.equal(prof.z, z, `${fp} -> height ${z} mm (got ${prof.z})`)
+}
+
+// height has to follow the chip size, or the whole point is lost
+const heights = ['C_0201_0603Metric', 'C_0402_1005Metric', 'C_0603_1608Metric', 'C_0805_2012Metric', 'C_1206_3216Metric'].map((f) => pkg(`Capacitor_SMD:${f}`).z)
+for (let i = 1; i < heights.length; i += 1) {
+  assert.ok(heights[i] >= heights[i - 1], `chip heights must not shrink with size: ${heights.join(', ')}`)
+}
+
+// vendor part-number footprints fall back to the reference designator
+assert.equal(pkg('TinyTapeout:434121025816', [], { ref: 'SW1' }).family, 'switch')
+assert.equal(pkg('CM5IO:GLPLXSMT188S7QQYG', [], { ref: 'J1' }).family, 'connector')
+assert.equal(pkg('TinyTapeout:WL_S7DS-157112V12700', [], { ref: 'U1' }).family, 'ic')
+
+// pitch comes out of the footprint name
+assert.equal(pkg('Package_SO:SOIC-8_3.9x4.9mm_P1.27mm').pitch, 1.27)
+assert.equal(pkg('Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical').pitch, 2.54)
+assert.equal(pkg('Capacitor_SMD:C_0402_1005Metric').pitch, null)
+
+// silhouettes: a cylinder is round, a chamfer has eight corners, a SOT is not a cube
+const silPts = (fp) => __test__.packageSilhouette(mkComp(fp), pkg(fp)).length
+assert.equal(silPts('Capacitor_THT:CP_Radial_D8.0mm_P3.50mm'), 16, 'electrolytics are cylinders')
+assert.equal(silPts('Package_DFN_QFN:QFN-32-1EP_5x5mm_P0.5mm'), 8, 'QFN bodies are chamfered')
+assert.equal(silPts('Package_SO:SOIC-8_3.9x4.9mm_P1.27mm'), 4, 'SOIC bodies are plain rectangles')
+
+// leads: real geometry at the real pads, on the board, below the body top
+const smdPins = [
+  { num: '1', x: 10, y: 8, w: 1.5, h: 0.6, rot: 0, kind: 'smd', drill: 0 },
+  { num: '2', x: 10, y: 12, w: 1.5, h: 0.6, rot: 0, kind: 'smd', drill: 0 }
+]
+const gull = __test__.packageLeads(mkComp('Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', smdPins), pkg('Package_SO:SOIC-8_3.9x4.9mm_P1.27mm', smdPins))
+assert.equal(gull.length, 2, 'one lead per pin')
+// body 4x3 at (10,10) => edges at y=8.5 and y=11.5; pins at y=8 and y=12 with
+// 0.6 mm pads => pad ends at 7.7 and 12.3. Each lead must span its whole gap.
+const bands = [[7.7, 8.5], [11.5, 12.3]]
+gull.forEach((l, i) => {
+  assert.ok(l.z1 > l.z0, 'a lead must have thickness')
+  assert.ok(l.z1 < 1.6, `a gull-wing lead must sit under the body top (${l.z1})`)
+  const ys = l.quad.map((p) => p[1])
+  assert.ok(Math.abs(Math.min(...ys) - bands[i][0]) < 0.02, `lead ${i} must reach its pad end (min y ${Math.min(...ys)}, want ${bands[i][0]})`)
+  assert.ok(Math.abs(Math.max(...ys) - bands[i][1]) < 0.02, `lead ${i} must reach the body edge (max y ${Math.max(...ys)}, want ${bands[i][1]})`)
+})
+const posts = __test__.packageLeads(mkComp('Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', smdPins), pkg('Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', smdPins))
+assert.ok(posts.length === 2 && posts.every((p) => Math.abs(p.z1 - 8.5) < 1e-6), 'header posts stand 8.5 mm out of the plastic')
+assert.equal(__test__.packageLeads(mkComp('MountingHole:MountingHole_3.2mm_M3_Pad', smdPins), pkg('MountingHole:MountingHole_3.2mm_M3_Pad', smdPins)).length, 0, 'a mounting hole has no body and no leads')
+
 // ---- the 3D view resolves depth per pixel, not by sorting ---------------- //
 // Two overlapping quads: the nearer one must win at the overlap, and the result
 // must not depend on the order they are handed to the rasteriser. A painter's

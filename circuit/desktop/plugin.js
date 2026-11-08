@@ -69,36 +69,199 @@ const PART_COLORS = {
 // Plated metal: solder fillets, part terminations, connector pins.
 const METAL = '#cfd3d8'
 
-// Footprint/part name -> a plausible body silhouette and height. A real 3D
-// viewer loads a STEP/VRML model per footprint (KiCad ships one for every
-// library part); without a mesh renderer the honest cheap win is the right
-// SHAPE and the right HEIGHT per part family, instead of every part being a
-// 0.45 mm slab. Ordered: first match wins.
-// Footprint/part name -> silhouette, height and material. A real 3D viewer loads
-// a STEP/VRML model per footprint; without a mesh renderer the honest cheap win
-// is the right shape, height and colour per family. First match wins, so the
-// specific patterns (electrolytic, capacitor, resistor) come before the size
-// patterns that would otherwise catch every 0805.
-const BODY_FAMILIES = [
-  [/^(cp-|cp_|.*electrolyt|.*radial|.*alu|.*can)/i, { sides: 16, z: 5.5, color: 'electrolytic', family: 'can' }],
-  [/led|ws2812|neopixel/i, { sides: 12, z: 0.9, color: 'led', family: 'led' }],
-  [/relay|srd|g5v|omron/i, { sides: 4, z: 12, color: 'relay', family: 'relay' }],
-  [/crystal|xtal|resonator/i, { sides: 4, z: 1.1, color: 'crystal', family: 'crystal' }],
-  [/usb|jst|barrel|screw|terminal|rj45|jack|conn/i, { sides: 8, z: 7, color: 'connector', family: 'connector' }],
-  [/pico|nano|module|arduino|feather|esp32|wroom|stm32|rp2040/i, { sides: 4, z: 6, color: 'module', family: 'module' }],
-  [/header|pinhead|pin-?socket/i, { sides: 4, z: 2.5, color: 'header', family: 'header' }],
-  [/capacitor|cap_|c_0|mlcc|ceramic/i, { sides: 8, z: 0.55, color: 'ceramic', family: 'passive' }],
-  [/resistor|res_|r_0/i, { sides: 8, z: 0.55, color: 'passive', family: 'passive' }],
-  [/soic|tssop|qfn|sot|msop|ssop|bga|dfn|dip/i, { sides: 4, z: 1.4, color: 'ic', family: 'ic' }],
-  [/sod|sma|smb|smc|do-/i, { sides: 4, z: 1.6, color: 'ic', family: 'diode' }],
-  [/0402|0603|0805|1206|1210/i, { sides: 8, z: 0.55, color: 'passive', family: 'passive' }],
+// The shadowed mouth of a connector shell (USB-C, RJ45, card slot).
+const SLOT_INK = '#0a0c0b'
+
+// --------------------------------------------------------------------------- //
+// Package geometry: what a part actually looks like
+// --------------------------------------------------------------------------- //
+// A real 3D viewer loads a STEP/VRML model per footprint. Without a mesh
+// renderer the honest win is procedural geometry driven by the package family
+// and the footprint's own numbers: the right height (this is what reads as
+// "wrong" when it is guessed), the right silhouette, the right material colour,
+// and leads at the real pad positions. Every rule below is ordered specific to
+// generic, because "CM5IO:SOT-23-6" must not match the module rule and
+// "C_0402_1005Metric" must not match the 0402 resistor rule by accident.
+
+// Nominal heights in mm above the board, from the package drawings (IPC-7351B
+// nominal for the chip sizes; datasheet body heights elsewhere).
+const CHIP_H = {
+  '01005': 0.2, '0201': 0.23, '0402': 0.5, '0603': 0.55, '0805': 0.6,
+  '1206': 0.65, '1210': 0.7, '1812': 0.8, '2010': 0.8, '2512': 0.9,
+  '1005': 0.5, '1608': 0.55, '2012': 0.6, '3216': 0.65, '3225': 0.7,
+  '4532': 0.8, '5025': 0.8, '6332': 0.9
+}
+
+// family, height (mm), material, silhouette, lead style
+const PACKAGE_RULES = [
+  // board features with no body of their own
+  { re: /stitching[-_ ]?via|^via[_-]|stitch\d/i, family: 'via', z: 0, shape: 'none' },
+  { re: /solder[-_ ]?jumper|solder[-_ ]?bridge|nettie|net[-_ ]?tie/i, family: 'flat', z: 0, shape: 'none' },
+  { re: /mounting[-_ ]?hole|mountinghole/i, family: 'hole', z: 0, shape: 'none' },
+  { re: /fiducial|fid\b/i, family: 'fiducial', z: 0, shape: 'none' },
+  { re: /testpoint_tht|test[-_ ]?point[-_ ]?tht/i, family: 'testpost', z: 1.2, color: 'metal', shape: 'cylinder', lead: 'tht' },
+  { re: /testpoint|test[-_ ]?point|pad_d\d/i, family: 'testpoint', z: 0, shape: 'none' },
+
+  // connectors, most specific first
+  { re: /usb[_-]?c|typec|type[_-]?c|usb4\d{3}/i, family: 'usb-c', z: 3.3, color: 'metal', shape: 'chamfer', slot: 0.42 },
+  { re: /usb[_-]?a\b|usba\b/i, family: 'usb-a', z: 13.5, color: 'metal', shape: 'rect', slot: 0.4 },
+  { re: /micro[_-]?usb|mini[_-]?usb/i, family: 'usb-mini', z: 2.5, color: 'metal', shape: 'chamfer', slot: 0.35 },
+  { re: /rj45|magjack|ethernet|8p8c/i, family: 'rj45', z: 13.6, color: 'connector', shape: 'rect', slot: 0.3 },
+  { re: /hdmi|displayport|micro[_-]?hdmi/i, family: 'hdmi', z: 6.0, color: 'metal', shape: 'rect', slot: 0.3 },
+  { re: /sd[-_ ]?card|microsd|tf[-_ ]?card|sim[-_ ]?card/i, family: 'card', z: 2.8, color: 'metal', shape: 'rect', slot: 0.28 },
+  { re: /m\.2|m2[-_ ]?(key|socket)/i, family: 'm2', z: 4.2, color: 'metal', shape: 'rect', slot: 0.22 },
+  { re: /hirose|fpc|ffc|zif|jst|ph\d|sh[_-]|sur\b|bm\d|sm\d|molex|picoblade/i, family: 'fpc', z: 2.4, color: 'connector', shape: 'rect' },
+  { re: /barrel|dc[-_ ]?jack|power[-_ ]?jack/i, family: 'barrel', z: 11, color: 'header', shape: 'cylinder' },
+  { re: /screw[-_ ]?terminal|terminal[-_ ]?block|edac|phoenix|dg\d{2}/i, family: 'terminal', z: 10, color: 'header', shape: 'rect' },
+  { re: /sma\b|bnc\b|u\.fl|ipex|mhf/i, family: 'rf', z: 10, color: 'metal', shape: 'cylinder', lead: 'tht' },
+  { re: /audio|trrs|headphone|jack\b/i, family: 'audio', z: 5, color: 'header', shape: 'rect', slot: 0.3 },
+
+  // headers: plastic body, posts standing out of it
+  { re: /pin[-_ ]?header|pin[-_ ]?socket|header|idc|box[-_ ]?header/i, family: 'header', z: 2.5, color: 'header', shape: 'rect', lead: 'post', postZ: 8.5 },
+
+  // electromechanical
+  { re: /relay|srd|g5v|omron|tq2/i, family: 'relay', z: 15, color: 'relay', shape: 'rect', lead: 'tht' },
+  { re: /buzzer|speaker/i, family: 'buzzer', z: 9.5, color: 'header', shape: 'cylinder', lead: 'tht' },
+  { re: /tact|push[-_ ]?button|pushbutton|switch|sw[-_ ]?\d/i, family: 'switch', z: 1.5, color: 'header', shape: 'rect' },
+  { re: /trimmer|potentiometer|\bpot\b/i, family: 'pot', z: 2.2, color: 'header', shape: 'rect' },
+  { re: /battery|coin[-_ ]?cell|cr20\d\d|holder/i, family: 'battery', z: 5.0, color: 'metal', shape: 'cylinder' },
+  { re: /shield|rf[-_ ]?can/i, family: 'shield', z: 2.5, color: 'metal', shape: 'chamfer' },
+
+  // discrete semiconductors
+  { re: /sot[_-]?223|dpak|d2pak|to[_-]?252/i, family: 'sot223', z: 1.8, color: 'ic', shape: 'chamfer', lead: 'gullwing' },
+  { re: /sot[_-]?89/i, family: 'sot89', z: 1.5, color: 'ic', shape: 'chamfer', lead: 'gullwing' },
+  { re: /sot[_-]?416|sc[_-]?70|sot[_-]?323|sot[_-]?363|sot[_-]?563/i, family: 'sot323', z: 0.9, color: 'ic', shape: 'chamfer', lead: 'gullwing' },
+  { re: /sot[_-]?23|sot[_-]?143/i, family: 'sot23', z: 1.1, color: 'ic', shape: 'chamfer', lead: 'gullwing' },
+  { re: /to[_-]?220|to[_-]?247|to[_-]?263/i, family: 'to220', z: 9.0, color: 'ic', shape: 'rect', lead: 'tab' },
+  { re: /to[_-]?92|to[_-]?126/i, family: 'to92', z: 4.5, color: 'ic', shape: 'cylinder', lead: 'tht' },
+  { re: /sod[_-]?323|sod[_-]?523|sod[_-]?123|smf/i, family: 'sod', z: 0.9, color: 'ic', shape: 'rect' },
+  { re: /sma\b|smb\b|smc\b|do[_-]?214/i, family: 'smx', z: 2.3, color: 'ic', shape: 'chamfer' },
+  { re: /melf/i, family: 'melf', z: 1.4, color: 'passive', shape: 'cylinder', lead: 'axial' },
+
+  // ICs: qfn before qfp, tssop before soic
+  { re: /wlcsp|\bcsp\b|bga/i, family: 'bga', z: 1.2, color: 'ic', shape: 'rect', lead: 'nolead' },
+  { re: /uson|son\b|xdfn/i, family: 'uson', z: 0.55, color: 'ic', shape: 'chamfer', lead: 'nolead' },
+  { re: /qfn|dfn/i, family: 'qfn', z: 0.9, color: 'ic', shape: 'chamfer', lead: 'nolead' },
+  { re: /tqfp|lqfp|qfp|pqfp/i, family: 'qfp', z: 1.4, color: 'ic', shape: 'chamfer', lead: 'gullwing' },
+  { re: /tssop|msop|vssop|qsop|ssop/i, family: 'tssop', z: 1.1, color: 'ic', shape: 'rect', lead: 'gullwing' },
+  { re: /soic|so[_-]?\d|sop\b|sop[_-]?\d/i, family: 'soic', z: 1.6, color: 'ic', shape: 'rect', lead: 'gullwing' },
+  { re: /dip|pdip|sdip/i, family: 'dip', z: 4.0, color: 'ic', shape: 'rect', lead: 'tht' },
+
+  // passives: tantalum before electrolytic (CP_EIA-3528 is a tantalum)
+  { re: /tantal|t49\d|eia[_-]?3528|eia[_-]?3216|eia[_-]?7343|eia[_-]?6032/i, family: 'tantalum', z: 2.0, color: 'ceramic', shape: 'chamfer' },
+  { re: /\bcp[_-]|electrolyt|alu[-_ ]?can|radial|_can\b/i, family: 'electrolytic', z: 6.0, color: 'electrolytic', shape: 'cylinder', lead: 'tht' },
+  { re: /crystal|xtal|resonator|hc[_-]?49/i, family: 'crystal', z: 1.0, color: 'crystal', shape: 'chamfer' },
+  { re: /inductor|coil|ferrite|\bl[_-]\d|srn\d|xal\d/i, family: 'inductor', z: 1.2, color: 'passive', shape: 'chamfer' },
+  { re: /led|ws2812|neopixel/i, family: 'led', z: 0.8, color: 'led', shape: 'dome' },
+
+  // modules: whole boards sitting on the board
+  { re: /compute[-_ ]?module|cm[45]\b|pico|nano|module|arduino|feather|esp32|wroom|rp2040/i, family: 'module', z: 6.0, color: 'module', shape: 'rect', lead: 'castellated' },
+
+  // generic passives by family word, height from the size code
+  { re: /cap|capacitor|\bc[_-]\d/i, family: 'chip', z: null, color: 'ceramic', shape: 'rect' },
+  { re: /res|resistor|\br[_-]\d/i, family: 'chip', z: null, color: 'passive', shape: 'rect' }
 ]
 
-function bodyProfile(comp) {
-  const key = `${comp.part || ''} ${comp.footprint || ''} ${comp.value || ''}`
-  for (const [re, shape] of BODY_FAMILIES) if (re.test(key)) return shape
+/** Last-resort family from the reference designator, for footprints whose name
+ *  is a vendor part number (…:434121025816 with ref SW1). */
+function refFallback(comp) {
+  const ref = String(comp.ref || '')
+  const pins = (comp.pins || []).length
+  const table = [
+    [/^SW\d/i, { family: 'switch', z: pins > 4 ? 3.0 : 1.5, color: 'header', shape: 'rect' }],
+    [/^K\d/i, { family: 'relay', z: 15, color: 'relay', shape: 'rect', lead: 'tht' }],
+    [/^Y\d|^X\d/i, { family: 'crystal', z: 1.0, color: 'crystal', shape: 'chamfer' }],
+    [/^F\d/i, { family: 'fuse', z: 1.2, color: 'ic', shape: 'rect' }],
+    [/^D\d/i, { family: 'diode', z: 0.9, color: 'ic', shape: 'rect' }],
+    [/^Q\d/i, { family: 'sot23', z: 1.1, color: 'ic', shape: 'chamfer', lead: 'gullwing' }],
+    [/^J\d|^P\d|^CN\d|^CON\d/i, { family: 'connector', z: pins >= 8 ? 3.0 : 4.5, color: 'connector', shape: 'rect' }],
+    [/^LS\d|^SP\d/i, { family: 'buzzer', z: 9.5, color: 'header', shape: 'cylinder', lead: 'tht' }],
+    [/^BT\d|^BAT\d/i, { family: 'battery', z: 5.0, color: 'metal', shape: 'cylinder' }],
+    [/^U\d/i, { family: 'ic', z: 1.2, color: 'ic', shape: 'rect', lead: pins > 8 ? 'gullwing' : 'none' }]
+  ]
+  for (const [re, shape] of table) {
+    if (re.test(ref)) {
+      return { ...shape, lead: shape.lead || 'none', pitch: null, postZ: 0, slot: 0, pins }
+    }
+  }
+  return null
+}
+
+function chipHeight(name) {
+  const m = /(01005|0201|0402|0603|0805|1206|1210|1812|2010|2512|1005|1608|2012|3216|3225|4532|5025|6332)/.exec(name)
+  return m ? CHIP_H[m[1]] || 0.55 : 0.55
+}
+
+/** Everything the renderers need to know about how a part is built.
+ *  Memoised per component object: the 3D pass runs on every pointermove. */
+const PKG_CACHE = typeof WeakMap === 'function' ? new WeakMap() : null
+function parsePackage(comp) {
+  if (PKG_CACHE && PKG_CACHE.has(comp)) return PKG_CACHE.get(comp)
+  const prof = parsePackageUncached(comp)
+  if (PKG_CACHE) PKG_CACHE.set(comp, prof)
+  return prof
+}
+
+function parsePackageUncached(comp) {
+  const key = `${comp.footprint || ''} ${comp.part || ''} ${comp.value || ''}`
   const b = comp.body || {}
-  return { sides: 4, z: b.z || 1, color: b.color || 'default', family: 'other' }
+  const pins = comp.pins || []
+  let rule = null
+  for (const r of PACKAGE_RULES) {
+    if (r.re.test(key)) { rule = r; break }
+  }
+  if (!rule) {
+    // No package name matched. A reference designator prefix is still a strong
+    // hint (SW1 is a switch, TP3 a test point), so use it before giving up.
+    const byRef = refFallback(comp)
+    if (byRef) return byRef
+    // Otherwise fall back to the engine's own body box, which is still better
+    // than a fixed slab.
+    return {
+      family: 'other',
+      z: Math.max(0.3, b.z || 1),
+      color: b.color || 'default',
+      shape: 'rect',
+      lead: pins.length > 2 ? 'gullwing' : 'none',
+      pitch: null,
+      pins: pins.length
+    }
+  }
+  const prof = {
+    family: rule.family,
+    z: rule.z == null ? chipHeight(key) : rule.z,
+    color: rule.color || (rule.family === 'chip' ? 'passive' : 'default'),
+    shape: rule.shape || 'rect',
+    lead: rule.lead || 'none',
+    pitch: parsePitch(key),
+    postZ: rule.postZ || 0,
+    slot: rule.slot || 0,
+    pins: pins.length
+  }
+  // Small overrides that need a number from the footprint name.
+  // These run against upper-case footprint names, so every pattern is /i.
+  if (prof.family === 'crystal' && /3225|3215/i.test(key)) prof.z = 0.8
+  if (prof.family === 'crystal' && /5032|4532/i.test(key)) prof.z = 1.0
+  if (prof.family === 'crystal' && /hc-?49/i.test(key)) prof.z = 3.5
+  if (prof.family === 'led' && /0402|1005|l1\.0|l1\.1/i.test(key)) prof.z = 0.45
+  if (prof.family === 'led' && /0603|1608|l1\.6|l1\.7/i.test(key)) prof.z = 0.6
+  if (prof.family === 'led' && /1206|3216|l2\.0|l3\.2/i.test(key)) prof.z = 0.9
+  if (prof.family === 'fpc' && /sh_|sh-/i.test(key)) prof.z = 2.9
+  if (prof.family === 'fpc' && /sur_|sur-/i.test(key)) prof.z = 1.3
+  if (prof.family === 'tantalum' && /3216/i.test(key)) prof.z = 1.6
+  if (prof.family === 'tantalum' && /3528/i.test(key)) prof.z = 1.9
+  if (prof.family === 'tantalum' && /7343/i.test(key)) prof.z = 3.0
+  if (prof.family === 'qfn' && /dfn2\d{3}|dfn_?2|uson2/i.test(key)) prof.z = 0.6
+  if (prof.family === 'inductor' && /xal\d{4}/i.test(key)) prof.z = 3.0
+  if (prof.family === 'inductor' && /srn\d{4}|srp\d{4}/i.test(key)) prof.z = 3.0
+  if (prof.family === 'sot23' && /sot-?416|sc-?70|sot-?323/i.test(key)) prof.z = 0.9
+  return prof
+}
+
+/** Pad pitch in mm, from a footprint name like …_P0.50mm_Vertical. */
+function parsePitch(name) {
+  const m = /[_-]p(\d+(?:\.\d+)?)\s?mm/i.exec(name)
+  return m ? parseFloat(m[1]) : null
 }
 
 /** Resolved body colour: the inferred family wins, then the engine's own hint. */
@@ -115,27 +278,171 @@ function inkFor(hex) {
   return lum > 128 ? '#101312' : '#e9ecea'
 }
 
-/** Body outline in world mm: a true rectangle for 4 sides, else an ellipse
- *  inscribed in the footprint box (cylinder for 12-16, chamfer for 8). */
-function bodyPolygon(comp, prof) {
+/** Body outline in world mm. Rectangle, chamfered rectangle, rounded rectangle
+ *  or a true circle, by package family — a SOT is not a cube and an electrolytic
+ *  is not a box. */
+function packageSilhouette(comp, prof) {
   const b = comp.body || {}
   const rot = ((comp.rot || 0) * Math.PI) / 180
-  const hw = b.w / 2
-  const hh = b.h / 2
   const cos = Math.cos(rot)
   const sin = Math.sin(rot)
+  const hw = b.w / 2
+  const hh = b.h / 2
+  const put = (lx, ly) => [comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos]
   const out = []
-  if (prof.sides <= 4) {
-    for (const [lx, ly] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
-      out.push([comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos])
+  const shape = prof.shape || 'rect'
+
+  if (shape === 'cylinder') {
+    // Inscribed 16-gon: at PCB scale a circle reads as a circle.
+    for (let i = 0; i < 16; i += 1) {
+      const a = (i / 16) * Math.PI * 2 + Math.PI / 16
+      out.push(put(Math.cos(a) * hw, Math.sin(a) * hh))
     }
     return out
   }
-  for (let i = 0; i < prof.sides; i += 1) {
-    const a = (i / prof.sides) * Math.PI * 2 + Math.PI / prof.sides
-    const lx = Math.cos(a) * hw
-    const ly = Math.sin(a) * hh
-    out.push([comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos])
+
+  if (shape === 'chamfer') {
+    const c = Math.min(Math.min(b.w, b.h) * 0.16, 0.55)
+    const pts = [
+      [-hw + c, -hh], [hw - c, -hh], [hw, -hh + c], [hw, hh - c],
+      [hw - c, hh], [-hw + c, hh], [-hw, hh - c], [-hw, -hh + c]
+    ]
+    for (const [lx, ly] of pts) out.push(put(lx, ly))
+    return out
+  }
+
+  if (shape === 'dome') {
+    // LED: a rounded body, the lens is added as a second solid by facetsFor.
+    const r = Math.min(hw, hh) * 0.55
+    const n = 12
+    for (let i = 0; i < n; i += 1) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n
+      out.push(put(Math.cos(a) * (hw - r) + Math.cos(a) * r, Math.sin(a) * (hh - r) + Math.sin(a) * r))
+    }
+    return out
+  }
+
+  for (const [lx, ly] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) out.push(put(lx, ly))
+  return out
+}
+
+/** A lighter hex shade of a hex colour (for LED lenses, plastic highlights). */
+function lightenHex(hex, factor) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * factor))
+  const gg = Math.min(255, Math.round(((n >> 8) & 255) * factor))
+  const b = Math.min(255, Math.round((n & 255) * factor))
+  return `#${((1 << 24) | (r << 16) | (gg << 8) | b).toString(16).slice(1)}`
+}
+
+/** Outward direction of a pin, snapped to the component's own axes. */
+function pinOutward(comp, pin) {
+  const rot = ((comp.rot || 0) * Math.PI) / 180
+  const dx = pin.x - comp.x
+  const dy = pin.y - comp.y
+  const lx = dx * Math.cos(rot) + dy * Math.sin(rot)
+  const ly = -dx * Math.sin(rot) + dy * Math.cos(rot)
+  if (Math.abs(lx) >= Math.abs(ly)) return [Math.sign(lx) || 1, 0]
+  return [0, Math.sign(ly) || 1]
+}
+
+/** Metal for a part, in board mm: the visible terminations.
+
+ *  Returns boxes — { quad, z0, z1, color } — so the 3D pass turns each into a
+ *  prism and the 2D pass fills the same quad. A gull-wing lead is a low strip
+ *  from under the body out to the pad end; a no-lead part gets a side pad
+ *  notch; a through-hole part gets a post; a header gets square pins standing
+ *  out of its plastic body.
+ */
+function packageLeads(comp, prof) {
+  const b = comp.body || {}
+  const pins = comp.pins || []
+  const style = prof.lead || 'none'
+  const out = []
+  if (style === 'none' || !b.w || !b.h || !pins.length) return out
+  const rot = ((comp.rot || 0) * Math.PI) / 180
+  const cos = Math.cos(rot)
+  const sin = Math.sin(rot)
+  const z0 = 0.02
+  for (const pin of pins) {
+    const [ux, uy] = pinOutward(comp, pin)
+    const wx = ux * cos - uy * sin
+    const wy = ux * sin + uy * cos
+    const vx = -wy
+    const vy = wx
+    // half extents of the pad along the outward axis and across it
+    const pu = (Math.abs(wx) * (pin.w || 0.5) + Math.abs(wy) * (pin.h || 0.5)) / 2
+    const pv = (Math.abs(vx) * (pin.w || 0.5) + Math.abs(vy) * (pin.h || 0.5)) / 2
+    const bu = (Math.abs(wx) * b.w + Math.abs(wy) * b.h) / 2
+    const at = (u, v) => [pin.x + wx * u + vx * v, pin.y + wy * u + vy * v]
+    // Distance from the pin centre to the body edge, along the outward axis.
+    // Measured from the PIN, not from the component centre: a pin on a SOIC sits
+    // 0.75 mm outside the body edge, not 2 mm, and a lead that starts at the
+    // centre-relative half-extent floats in the middle of nowhere.
+    const offU = (pin.x - comp.x) * wx + (pin.y - comp.y) * wy
+    const edge = -Math.max(0.05, offU - bu)
+
+    if (style === 'gullwing') {
+      const inner = edge
+      const outer = pu
+      if (outer - inner < 0.08) continue
+      const wv = Math.max(0.12, pv * 0.8)
+      out.push({
+        quad: [at(inner, -wv), at(inner, wv), at(outer, wv), at(outer, -wv)],
+        z0,
+        z1: z0 + Math.min(0.32, Math.max(0.12, (prof.z || 1) * 0.22)),
+        color: 'metal'
+      })
+    } else if (style === 'nolead' || style === 'castellated') {
+      const wv = Math.max(0.1, Math.min(pv * 0.9, (prof.pitch || 0.5) * 0.5))
+      const inner = -Math.max(0.02, offU - bu) - 0.04
+      const outer = -Math.max(0.02, offU - bu) + (style === 'castellated' ? 0.18 : 0.1)
+      out.push({
+        quad: [at(inner, -wv), at(inner, wv), at(outer, wv), at(outer, -wv)],
+        z0: style === 'castellated' ? z0 : z0 + 0.06,
+        z1: style === 'castellated' ? Math.min(prof.z, 0.9) : Math.max(0.2, prof.z - 0.12),
+        color: 'metal'
+      })
+    } else if (style === 'tht') {
+      const r = Math.max(0.2, Math.min(0.5, (pin.drill || 0.8) / 2))
+      const n = 8
+      const quad = []
+      for (let i = 0; i < n; i += 1) {
+        const a = (i / n) * Math.PI * 2 + Math.PI / n
+        quad.push([pin.x + Math.cos(a) * r, pin.y + Math.sin(a) * r])
+      }
+      out.push({ quad, z0, z1: z0 + Math.max(0.6, prof.z * 0.9), color: 'metal' })
+    } else if (style === 'post') {
+      const half = 0.32
+      out.push({
+        quad: [
+          [pin.x - half, pin.y - half], [pin.x + half, pin.y - half],
+          [pin.x + half, pin.y + half], [pin.x - half, pin.y + half]
+        ],
+        z0,
+        z1: prof.postZ || 8.5,
+        color: 'metal'
+      })
+    } else if (style === 'axial') {
+      const inner = edge
+      const wv = Math.max(0.1, pv * 0.7)
+      out.push({
+        quad: [at(inner, -wv), at(inner, wv), at(pu, wv), at(pu, -wv)],
+        z0: z0 + (prof.z || 1) * 0.25,
+        z1: z0 + (prof.z || 1) * 0.55,
+        color: 'metal'
+      })
+    } else if (style === 'tab') {
+      const wv = Math.max(0.4, pv * 1.4)
+      out.push({
+        quad: [at(edge, -wv), at(edge, wv), at(pu, wv), at(pu, -wv)],
+        z0: z0 + 0.1,
+        z1: z0 + 0.4,
+        color: 'metal'
+      })
+    }
   }
   return out
 }
@@ -416,18 +723,26 @@ function drawBoard2D(g, view, opts) {
     for (const c of view.components) {
       const b = c.body || { w: 0, h: 0 }
       if (!b.w || !b.h) continue
-      const prof = bodyProfile(c)
-      const poly = bodyPolygon(c, prof)
+      const prof = parsePackage(c)
       const color = bodyColor(c, prof)
-      // Opaque: a translucent body let the copper and silk show through it, which
-      // reads as a mistake, not as depth.
-      polyFill(poly, color)
-      g.strokeStyle = 'rgba(0,0,0,0.38)'
-      g.lineWidth = Math.max(0.06, px * 0.7)
-      g.stroke()
+      if (prof.shape !== 'none') {
+        const poly = packageSilhouette(c, prof)
+        // Opaque: a translucent body let the copper and silk show through it,
+        // which reads as a mistake, not as depth.
+        polyFill(poly, color)
+        g.strokeStyle = 'rgba(0,0,0,0.38)'
+        g.lineWidth = Math.max(0.06, px * 0.7)
+        g.stroke()
+        // connector mouth: a dark slot at the front face, in plan view
+        if (prof.slot) {
+          const quad = localQuad(c, -b.w / 2 + Math.min(b.w * 0.16, 1.2), -b.h / 2,
+            b.w / 2 - Math.min(b.w * 0.16, 1.2), -b.h / 2 + b.h * prof.slot)
+          polyFill(quad, SLOT_INK)
+        }
+      }
       const plan = metalPlan(c)
       for (const cap of plan.caps) polyFill(cap.quad, METAL)
-      for (const lead of plan.leads) polyFill(lead, METAL)
+      for (const lead of packageLeads(c, prof)) polyFill(lead.quad, METAL)
       if (t.k > 9) {
         g.save()
         g.translate(c.x, c.y - (b.h / 2 + 1.4))
@@ -505,6 +820,30 @@ function facetsFor(view, opts) {
       obj: currentObject,
       ...(extra || {})
     })
+  }
+
+  // A solid: top face plus one quad per side. Used for bodies and for every
+  // piece of metal (leads, posts, tabs), so a lead cannot drift from its pad.
+  const pushPrism = (poly, zBottom, zTop, color, rank, extra) => {
+    if (!poly || poly.length < 3) return
+    pushPoly(poly.map((p) => [p[0], p[1], zTop]), color, [0, 0, 1], 0, 'top', rank, extra)
+    for (let i = 0; i < poly.length; i += 1) {
+      const p = poly[i]
+      const q = poly[(i + 1) % poly.length]
+      pushPoly(
+        [
+          [p[0], p[1], zBottom],
+          [q[0], q[1], zBottom],
+          [q[0], q[1], zTop],
+          [p[0], p[1], zTop]
+        ],
+        color,
+        [q[1] - p[1], -(q[0] - p[0]), 0],
+        0,
+        'top',
+        rank
+      )
+    }
   }
 
   // substrate: both faces are soldermask green, the exposed edge is plated
@@ -653,37 +992,58 @@ function facetsFor(view, opts) {
     setObject(`part:${comp.ref}`)
     const b = comp.body || {}
     if (!b.w || !b.h) continue
-    const prof = bodyProfile(comp)
+    const prof = parsePackage(comp)
     const color = bodyColor(comp, prof)
-    const corners = bodyPolygon(comp, prof)
     const z0 = th + 0.06
     const z1 = z0 + Math.max(0.3, prof.z || b.z || 1)
     const pins = comp.pins || []
 
-    // shadow: same footprint at the body's base, offset in screen space at draw
-    pushPoly(corners.map((p) => [p[0], p[1], z0]), color, [0, 0, 1], 0, 'top', 2.5, { shadow: true })
+    if (prof.shape !== 'none') {
+      const corners = packageSilhouette(comp, prof)
 
-    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3, {
-      label: { text: comp.ref, w: b.w, h: b.h, ink: inkFor(color) },
-      pin1: pins.length ? [pins[0].x, pins[0].y, z1 + 0.01] : null
-    })
-    for (let i = 0; i < corners.length; i += 1) {
-      const p = corners[i]
-      const q = corners[(i + 1) % corners.length]
-      const n = [q[1] - p[1], -(q[0] - p[0]), 0]
-      pushPoly(
-        [
-          [p[0], p[1], z0],
-          [q[0], q[1], z0],
-          [q[0], q[1], z1],
-          [p[0], p[1], z1]
-        ],
-        color,
-        n,
-        lift,
-        'top',
-        3
-      )
+      // shadow: same footprint at the body's base, offset in screen space at draw
+      pushPoly(corners.map((p) => [p[0], p[1], z0]), color, [0, 0, 1], 0, 'top', 2.5, { shadow: true })
+
+      pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3, {
+        label: { text: comp.ref, w: b.w, h: b.h, ink: inkFor(color) },
+        pin1: pins.length ? [pins[0].x, pins[0].y, z1 + 0.01] : null
+      })
+      for (let i = 0; i < corners.length; i += 1) {
+        const p = corners[i]
+        const q = corners[(i + 1) % corners.length]
+        const n = [q[1] - p[1], -(q[0] - p[0]), 0]
+        pushPoly(
+          [
+            [p[0], p[1], z0],
+            [q[0], q[1], z0],
+            [q[0], q[1], z1],
+            [p[0], p[1], z1]
+          ],
+          color,
+          n,
+          lift,
+          'top',
+          3
+        )
+      }
+
+      // LED lens: a smaller, lighter cylinder sitting on the body
+      if (prof.shape === 'dome') {
+        const r = Math.min(b.w, b.h) * 0.33
+        const lens = []
+        for (let i = 0; i < 12; i += 1) {
+          const a = (i / 12) * Math.PI * 2
+          lens.push([comp.x + Math.cos(a) * r, comp.y + Math.sin(a) * r])
+        }
+        pushPrism(lens, z1, z1 + Math.max(0.15, prof.z * 0.4), lightenHex(color, 1.45), 3.2)
+      }
+
+      // connector mouth: a dark slot in the front face
+      if (prof.slot) {
+        const quad = localQuad(comp, -b.w / 2 + Math.min(b.w * 0.16, 1.2), -b.h / 2,
+          b.w / 2 - Math.min(b.w * 0.16, 1.2), -b.h / 2 + b.h * prof.slot)
+        pushPoly(quad.map((p) => [p[0], p[1], z1 + 0.01]), SLOT_INK, [0, 0, 1], lift, 'top', 3.1)
+      }
     }
 
     // ---- metal -----------------------------------------------------------
@@ -704,11 +1064,20 @@ function facetsFor(view, opts) {
         3.5
       )
     }
-    for (const lead of plan.leads) {
-      pushPoly(lead.map((p) => [p[0], p[1], th + 0.045]), METAL, [0, 0, 1], lift, 'top', 3.5)
+    for (const lead of packageLeads(comp, prof)) {
+      pushPrism(lead.quad, th + lead.z0, th + lead.z1, METAL, 3.5)
     }
   }
   return faces
+}
+
+/** A rectangle in the component's own frame, rotated into board mm. */
+function localQuad(comp, x0, y0, x1, y1) {
+  const rot = ((comp.rot || 0) * Math.PI) / 180
+  const cos = Math.cos(rot)
+  const sin = Math.sin(rot)
+  const put = (lx, ly) => [comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos]
+  return [put(x0, y0), put(x1, y0), put(x1, y1), put(x0, y1)]
 }
 
 /** Etch a designator onto a projected top face.
@@ -744,9 +1113,10 @@ function drawFaceLabel(g, pts, label) {
   g.restore()
 }
 
-/** Metal geometry for a part, in board mm: end caps for two-terminal parts,
- *  leads for the pins that poke out past the body. Shared by the 2D and 3D
- *  renderers so both show the same terminations. */
+/** End terminations for two-terminal parts (chip caps, resistors, tantalums), in
+ *  board mm. Everything else — leads, posts, tabs — comes from packageLeads(),
+ *  which knows the package's lead style and thickness; these caps are the metal
+ *  ends you see on a chip part from above. */
 function metalPlan(comp) {
   const b = comp.body || {}
   const pins = comp.pins || []
@@ -757,7 +1127,6 @@ function metalPlan(comp) {
   const hp = (Math.abs(px[0]) * b.w + Math.abs(px[1]) * b.h) / 2
   const at = (a, c) => [comp.x + ax[0] * a + px[0] * c, comp.y + ax[1] * a + px[1] * c]
   const caps = []
-  const leads = []
   if (pins.length === 2) {
     const capLen = Math.min(Math.max(hx * 0.44, 0.22), 1.0)
     for (const side of [-1, 1]) {
@@ -769,39 +1138,8 @@ function metalPlan(comp) {
         normal: [side * ax[0], side * ax[1], 0]
       })
     }
-    return { caps, leads }
   }
-  for (const pin of pins) {
-    const pw = pin.w || 0.4
-    const ph = pin.h || 0.4
-    const dx = pin.x - comp.x
-    const dy = pin.y - comp.y
-    const a = dx * ax[0] + dy * ax[1]
-    const c = dx * px[0] + dy * px[1]
-    const alongAxis = Math.abs(a) >= Math.abs(c)
-    const u = alongAxis ? ax : px
-    const v = alongAxis ? px : ax
-    const offU = alongAxis ? a : c
-    const offV = alongAxis ? c : a
-    const bodyHalf = alongAxis ? hx : hp
-    const side = offU < 0 ? -1 : 1
-    const padHalfU = (Math.abs(u[0]) * pw + Math.abs(u[1]) * ph) / 2
-    const padHalfV = (Math.abs(v[0]) * pw + Math.abs(v[1]) * ph) / 2
-    const outerU = offU + side * padHalfU
-    if (Math.abs(outerU) <= bodyHalf + 0.02) continue    // hidden under the body
-    const innerU = side * bodyHalf
-    const atUV = (uAmt, vAmt) => [
-      comp.x + u[0] * uAmt + v[0] * vAmt,
-      comp.y + u[1] * uAmt + v[1] * vAmt
-    ]
-    leads.push([
-      atUV(innerU, offV - padHalfV),
-      atUV(outerU, offV - padHalfV),
-      atUV(outerU, offV + padHalfV),
-      atUV(innerU, offV + padHalfV)
-    ])
-  }
-  return { caps, leads }
+  return { caps }
 }
 
 function drawBoard3D(g, view, opts) {
@@ -1820,4 +2158,8 @@ export default {
 }
 
 // Exported for the Node test harness only; the loader uses `default`.
-export const __test__ = { facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, zRaster, packShaded, InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS }
+export const __test__ = {
+  facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, zRaster, packShaded,
+  parsePackage, packageSilhouette, packageLeads, metalPlan, chipHeight, parsePitch,
+  InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS
+}
