@@ -43,12 +43,29 @@ export function useEffect() {}
 export function useLayoutEffect() {}
 `)
 write('node_modules/react/jsx-runtime.js', `
-export function jsx(type, props) { return { type, props: props || {} } }
-export function jsxs(type, props) { return { type, props: props || {} } }
+// Mirror the real runtime signature: jsx(type, props, key). A third positional
+// argument is the KEY, so children passed there are silently dropped by React —
+// the exact bug that left the Board tab blank. Fail loudly instead.
+function build(fn) {
+  return function (type, props, key) {
+    if (arguments.length > 3) throw new Error(fn + ': too many arguments (type, props, key) — children belong in props.children')
+    if (Array.isArray(key)) throw new Error(fn + ': children passed as the 3rd argument; that slot is \`key\`')
+    return { type, props: props || {}, key }
+  }
+}
+export const jsx = build('jsx')
+export const jsxs = build('jsxs')
 `)
 write('node_modules/react/jsx-runtime.mjs', `
-export function jsx(type, props) { return { type, props: props || {} } }
-export function jsxs(type, props) { return { type, props: props || {} } }
+function build(fn) {
+  return function (type, props, key) {
+    if (arguments.length > 3) throw new Error(fn + ': too many arguments (type, props, key) — children belong in props.children')
+    if (Array.isArray(key)) throw new Error(fn + ': children passed as the 3rd argument; that slot is \`key\`')
+    return { type, props: props || {}, key }
+  }
+}
+export const jsx = build('jsx')
+export const jsxs = build('jsxs')
 `)
 write('node_modules/react/package.json', JSON.stringify({
   name: 'react', type: 'module', main: 'index.mjs',
@@ -66,7 +83,9 @@ const contributions = []
 const ctx = {
   register: (c) => contributions.push(c),
   rest: async () => ({}),
-  storage: { get: (k, d) => d, set() {}, remove() {} },
+  // Hooks are stubbed, so the "pick a board" effect never runs: seed the
+  // selected slug the same way the app does after `Open board`.
+  storage: { get: (k, d) => (k === 'selected' ? 'pico-sensor-hub' : d), set() {}, remove() {} },
   onDispose: () => {},
   setTimeout: (f) => setTimeout(f, 0),
   setInterval: (f) => setInterval(f, 1000)
@@ -149,6 +168,15 @@ const pageText = texts(__test__.BoardPage({ ctx })).join(' ')
 assert.ok(pageText.includes('Boards'), 'sidebar renders')
 assert.ok(pageText.includes('DRC clean'), 'DRC badge renders')
 assert.ok(pageText.includes('Pico sensor hub'), 'page title renders')
+assert.ok(pageText.includes('13 parts'), 'sidebar board row keeps its size/parts meta line')
+// Tab labels come from `chip()`; dropping them left five blank pills.
+for (const label of ['Board', 'Nets', 'BOM', 'DRC', 'Files']) {
+  assert.ok(pageText.includes(label), `tab bar shows the "${label}" label`)
+}
+// The default Board tab is a canvas + hint row; an empty body here means the
+// canvas never mounted (regression: children passed as jsxs's key argument).
+assert.ok(pageText.includes('hover a pad'), 'board tab body renders its canvas hint')
+assert.ok(pageText.includes('Design'), 'board tab body renders the net sidebar')
 
 console.log(JSON.stringify({
   ok: true,

@@ -101,7 +101,7 @@ const dot = (color, size = 7) =>
     }
   })
 
-const chip = (label, active, onClick, swatch) =>
+const chip = (label, active, onClick, swatch, key) =>
   jsx(
     'button',
     {
@@ -120,14 +120,19 @@ const chip = (label, active, onClick, swatch) =>
         border: `1px solid ${active ? UI.accent : UI.stroke}`,
         background: active ? 'rgba(127,199,161,0.12)' : 'transparent',
         color: active ? UI.text : UI.dim
-      }
+      },
+      children: [
+        swatch
+          ? jsx(
+              'span',
+              { style: { width: 7, height: 7, borderRadius: 2, background: swatch, display: 'inline-block' } },
+              'swatch'
+            )
+          : null,
+        label
+      ]
     },
-    swatch
-      ? jsx('span', {
-          style: { width: 7, height: 7, borderRadius: 2, background: swatch, display: 'inline-block' }
-        })
-      : null,
-    label
+    key
   )
 
 const stat = (label, value) =>
@@ -655,6 +660,25 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
     if (mode === '2d' && onPick) onPick(null)
   }
 
+  // React attaches `wheel` at the root as a PASSIVE listener, so the
+  // preventDefault() inside a JSX onWheel handler is ignored: the page scrolls
+  // instead of the board zooming and the console fills with warnings. Bind our
+  // own non-passive listener on the canvas instead.
+  const onWheelRef = useRef(onWheel)
+  useEffect(() => {
+    onWheelRef.current = onWheel
+  })
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return undefined
+    const handler = (e) => {
+      e.preventDefault()
+      onWheelRef.current(e)
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
+
   return jsx('div', {
     ref: wrapRef,
     style: { position: 'relative', width: '100%', height: height || '100%', minHeight: 180, overflow: 'hidden' },
@@ -665,7 +689,6 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       onPointerMove,
       onPointerUp,
       onPointerLeave: onPointerUp,
-      onWheel,
       onClick,
       role: 'img',
       'aria-label': view ? `${view.title} board preview` : 'board preview'
@@ -699,7 +722,7 @@ function LayerChips({ layers, setLayers, compact }) {
   return jsx('div', {
     style: { display: 'flex', gap: 6, flexWrap: 'wrap' },
     children: LAYER_KEYS.filter((k) => !(compact && k[0] === 'parts')).map(([key, label, color]) =>
-      chip(label, layers[key], () => setLayers({ ...layers, [key]: !layers[key] }), color)
+      chip(label, layers[key], () => setLayers({ ...layers, [key]: !layers[key] }), color, key)
     )
   })
 }
@@ -973,15 +996,18 @@ function BoardPage({ ctx }) {
               display: 'flex',
               flexDirection: 'column',
               gap: 3
-            }
+            },
+            children: [
+              jsx('div', { style: { fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: b.title }, 'title'),
+              jsxs('div', { style: { fontSize: 11, color: UI.faint, display: 'flex', gap: 6, alignItems: 'center' }, children: [
+                jsx('span', { children: `${b.board.width}×${b.board.height}` }),
+                jsx('span', { children: '·' }),
+                jsx('span', { children: `${b.components} parts` }),
+                dot(b.drc_ok === true ? '#6fbf8f' : b.drc_ok === false ? '#c96a5a' : '#6d776f', 6)
+              ] }, 'meta')
+            ]
           },
-          jsx('div', { style: { fontSize: 12.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: b.title }),
-          jsxs('div', { style: { fontSize: 11, color: UI.faint, display: 'flex', gap: 6, alignItems: 'center' }, children: [
-            jsx('span', { children: `${b.board.width}×${b.board.height}` }),
-            jsx('span', { children: '·' }),
-            jsx('span', { children: `${b.components} parts` }),
-            dot(b.drc_ok === true ? '#6fbf8f' : b.drc_ok === false ? '#c96a5a' : '#6d776f', 6)
-          ] })
+          b.slug
         )
       ),
       boards.length === 0 && !list.isLoading
@@ -1016,7 +1042,7 @@ function BoardPage({ ctx }) {
 
   const tabBar = jsx('div', {
     style: { display: 'flex', gap: 4, padding: '8px 14px 0' },
-    children: tabs.map(([key, label]) => chip(label, tab === key, () => setTab(key)))
+    children: tabs.map(([key, label]) => chip(label, tab === key, () => setTab(key), undefined, key))
   })
 
   const statsRow = view
@@ -1039,7 +1065,7 @@ function BoardPage({ ctx }) {
     body = emptyState('Circuit backend not reachable', 'Enable the Circuit plugin in Settings → Plugins so its API mounts, then reload desktop plugins.')
   } else if (view) {
     if (tab === 'board') {
-      body = jsxs('div', { style: { display: 'flex', flex: 1, minHeight: 0 } }, [
+      body = jsxs('div', { style: { display: 'flex', flex: 1, minHeight: 0 }, children: [
         jsxs('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }, children: [
           jsx('div', {
             style: { flex: 1, minHeight: 260, borderRadius: 12, overflow: 'hidden', border: `1px solid ${UI.stroke}`, background: 'radial-gradient(120% 120% at 50% 0%, #0d1712 0%, #070a08 70%)' },
@@ -1083,7 +1109,7 @@ function BoardPage({ ctx }) {
             jsx(NetRow, { net: n, active: hot === n.name, onClick: () => setHot(hot === n.name ? null : n.name), onHover: setHot }, n.name)
           ) })
         ] })
-      ])
+      ] })
     } else if (tab === 'nets') {
       body = jsx(Table, {
         columns: [
