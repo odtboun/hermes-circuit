@@ -7,7 +7,6 @@ inline chat card, the workspace page and the test suite.
 
 from __future__ import annotations
 
-import hashlib
 from typing import Dict, List, Optional
 
 from . import drc, layers
@@ -92,14 +91,3 @@ def compact(board: Board, max_nets: int = 0) -> dict:
                        for c in board.data["components"]],
         "nets": sorted(board.data["nets"])[:max_nets or None],
     }
-
-
-def file_hashes(paths: Dict[str, "object"]) -> Dict[str, dict]:
-    out: Dict[str, dict] = {}
-    for name, p in paths.items():
-        try:
-            data = p.read_bytes()
-        except OSError:
-            continue
-        out[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()[:16]}
-    return out
