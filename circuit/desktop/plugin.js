@@ -856,115 +856,199 @@ function drawBoard3D(g, view, opts) {
     g.restore()
   }
 
-  const prepared = []
+  // ---- software z-buffer ---------------------------------------------------
+  // A painter's algorithm cannot order this scene. CM5 MINIMA has a 40x55 mm
+  // module 6 mm tall sitting over the whole board; no global sort can put a
+  // small part that lies *under* it behind it without also burying the parts
+  // that sit on top. Sorting by average depth left 27% of interior pixels
+  // disagreeing with a real depth test (measured against a numpy z-buffer), and
+  // that disagreement is exactly the "parts go through each other / are
+  // see-through" look. So depth is resolved per pixel: flat-shaded faces are
+  // rasterised scanline by scanline into a colour buffer and a 1/z buffer, and
+  // the result is composited over the shadow in one drawImage. Correct by
+  // construction — no ranks, no ordering heuristics, nothing can pop in or out.
+  const ss = Math.min(2, Math.max(1, Math.round(dpr || 1)))
+  const rw = Math.max(1, Math.round(w * ss))
+  const rh = Math.max(1, Math.round(h * ss))
+  const th = view.board.thickness || 1.6
+
+  const items = []
   for (const f of faces) {
-    const pts = f.pts.map(project)
-    if (pts.some((p) => p === null)) continue
-    const depth = pts.reduce((acc, p) => acc + p[2], 0) / pts.length
-    prepared.push({ f, pts, depth })
-  }
-
-  // Fixed paint passes, far-to-near inside each (see facetsFor for why a single
-  // global depth sort cannot order a stack of coplanar sheets). Turning the board
-  // past vertical puts the camera under it, so the pass sequence is mirrored.
-  const underside = Math.cos(opts.pitch || 0) < 0
-  const sequence = underside
-    ? [['top', 3.5], ['top', 3], ['top', 2.6], ['top', 2.5], ['top', 2], ['top', 1.5], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 1.5], ['bottom', 2]]
-    : [['bottom', 2], ['bottom', 1.5], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 1.5], ['top', 2], ['top', 2.5], ['top', 2.6], ['top', 3], ['top', 3.5]]
-  const passes = new Map()
-  for (const item of prepared) {
-    const key = `${item.f.side}:${item.f.rank}`
-    if (!passes.has(key)) passes.set(key, [])
-    passes.get(key).push(item)
-  }
-  // Inside a pass, paint whole OBJECTS back-to-front and only then order faces
-  // within an object. Sorting every face by average depth let a small part's
-  // faces slip between the faces of a big one it sits inside — the "parts go
-  // through each other" look on boards with overlapping footprints (CM5 MINIMA
-  // has two 40x55 mm module bodies stacked on an M.2 socket).
-  const byObject = (bucket) => {
-    const groups = new Map()
-    for (const item of bucket) {
-      const key = item.f.obj || 'misc'
-      if (!groups.has(key)) groups.set(key, { key, sum: 0, n: 0, items: [] })
-      const grp = groups.get(key)
-      grp.sum += item.depth
-      grp.n += 1
-      grp.items.push(item)
-    }
-    const ordered = [...groups.values()].sort((a, b) => {
-      const da = a.sum / a.n
-      const db = b.sum / b.n
-      if (Math.abs(da - db) > 1e-6) return db - da          // farther first
-      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0      // stable tie-break
-    })
-    const out = []
-    for (const grp of ordered) out.push(...grp.items.sort((a, b) => b.depth - a.depth))
-    return out
-  }
-  const ordered = []
-  for (const [side, rank] of sequence) {
-    const bucket = passes.get(`${side}:${rank}`)
-    if (bucket) ordered.push(...byObject(bucket))
-  }
-
-  for (const item of ordered) {
-    const { f, pts } = item
     const n = f.n || [0, 0, 1]
     const rn = rotate(n)
     // Normals arrive in board units, not normalized (a side face carries
     // [dy, -dx, 0], magnitude ~20 mm), so the raw dot product reached 5-7 and
     // every side face saturated to pure white over the pads and part bodies.
     const len = Math.hypot(rn[0], rn[1], rn[2]) || 1
-    // Cull faces pointing away from the camera (it sits on +z looking down -z).
-    // Without it every box also painted its four far-side walls, so you could
-    // read the inside of a part through the one in front of it.
+    // Cull faces pointing away from the camera (it sits on +z looking down -z),
+    // otherwise every box also paints its far walls and you can read the inside
+    // of a part through the one in front of it.
     if (rn[2] / len <= 0) continue
     const lambert = Math.max(0, (rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2]) / len)
     // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
     // into near-black, which read as "empty" next to reference renders.
-    const shade = 0.68 + 0.32 * lambert
-
-    if (f.shadow) {
-      // Part shadow: the same footprint pushed down-right, filled with an opaque
-      // darkened copy of the part colour — solid, so nothing in the scene is
-      // see-through.
-      g.beginPath()
-      g.moveTo(pts[0][0] + 2.5, pts[0][1] + 4)
-      for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0] + 2.5, pts[i][1] + 4)
-      g.closePath()
-      g.fillStyle = shadeColor(f.color, 0.45, 1)
-      g.fill()
-      continue
+    const shade = f.shadow ? 0.45 : 0.68 + 0.32 * lambert
+    const pts = []
+    let zsum = 0
+    let culled = false
+    for (const p of f.pts) {
+      const q = project(p)
+      if (!q) { culled = true; break }
+      const dx = f.shadow ? 2.5 : 0
+      const dy = f.shadow ? 4 : 0
+      pts.push([(q[0] + dx) * ss, (q[1] + dy) * ss, 1 / q[2]])
+      zsum += q[2]
     }
+    if (culled || pts.length < 3) continue
+    items.push({ f, pts, rgb: packShaded(f.color, shade), depth: zsum / pts.length })
+  }
 
-    g.beginPath()
-    g.moveTo(pts[0][0], pts[0][1])
-    for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0], pts[i][1])
-    g.closePath()
-    const faceFill = shadeColor(f.color, shade, opts.alpha || 1)
-    g.fillStyle = faceFill
-    g.fill()
-    // Stroke each face in its OWN colour: adjacent faces only touch at
-    // antialiased edges, so without it the background shows through as a
-    // see-through seam on every join (measured: 21k near-zero-alpha pixels, 7%
-    // of the canvas). A black stroke closed the seams too but inked the board in;
-    // same-colour does not.
-    g.strokeStyle = faceFill
-    g.lineWidth = 0.9
-    g.stroke()
+  const raster = zRaster(items, rw, rh)
+  const image = makeImage(raster.px, rw, rh)
+  const off = offscreen(canvas, rw, rh)
+  if (off) {
+    off.getContext('2d').putImageData(image, 0, 0)
+    g.drawImage(off, 0, 0, w, h)
+  } else {
+    g.putImageData(image, 0, 0)
+  }
 
+  // Labels and pin-1 dots stay vector so the text is crisp. They are drawn only
+  // where the face they belong to is the surface actually visible at that pixel,
+  // which keeps a hidden part's designator from floating on top of its neighbour.
+  const visible = (it, cx2, cy2) => {
+    const x = Math.round(cx2 * ss)
+    const y = Math.round(cy2 * ss)
+    if (x < 0 || y < 0 || x >= rw || y >= rh) return false
+    const owner = raster.owner[y * rw + x]
+    return owner >= 0 && items[owner].f.obj === it.f.obj
+  }
+  const overlays = items.filter((it) => it.f.label || it.f.pin1).sort((a, b) => b.depth - a.depth)
+  for (const it of overlays) {
+    const f = it.f
     if (f.pin1) {
       const dot = project(f.pin1)
-      if (dot) {
+      if (dot && visible(it, dot[0], dot[1])) {
         g.beginPath()
         g.arc(dot[0], dot[1], 2.2, 0, Math.PI * 2)
         g.fillStyle = '#0b0e0d'
         g.fill()
       }
     }
-    if (f.label) drawFaceLabel(g, pts, f.label)
+    if (f.label) {
+      const css = it.pts.map((p) => [p[0] / ss, p[1] / ss])
+      let ax = 0
+      let ay = 0
+      for (const p of css) { ax += p[0]; ay += p[1] }
+      ax /= css.length
+      ay /= css.length
+      if (visible(it, ax, ay)) drawFaceLabel(g, css, f.label)
+    }
   }
+
+  canvas.__stats = { faces: faces.length, drawn: items.length, painted: raster.painted }
+}
+
+// Pack a shaded hex colour into the ABGR word an ImageData buffer wants on a
+// little-endian machine (bytes in memory: R, G, B, A).
+function packShaded(hex, factor) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return 0xff000000
+  const n = parseInt(m[1], 16)
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * factor))
+  const gg = Math.min(255, Math.round(((n >> 8) & 255) * factor))
+  const b = Math.min(255, Math.round((n & 255) * factor))
+  return ((255 << 24) | (b << 16) | (gg << 8) | r) >>> 0
+}
+
+function makeImage(px, rw, rh) {
+  const bytes = new Uint8ClampedArray(px.buffer, 0, rw * rh * 4)
+  if (typeof ImageData !== 'undefined') return new ImageData(bytes, rw, rh)
+  return { width: rw, height: rh, data: bytes }
+}
+
+// One offscreen canvas per board canvas, reused between frames: allocating a
+// 1800x1280 backing store on every pointermove is what makes drags stutter.
+function offscreen(canvas, rw, rh) {
+  if (canvas.__zbCanvas) {
+    const c = canvas.__zbCanvas
+    if (c.width !== rw) c.width = rw
+    if (c.height !== rh) c.height = rh
+    return c
+  }
+  if (typeof document === 'undefined' || !document.createElement) return null
+  const c = document.createElement('canvas')
+  c.width = rw
+  c.height = rh
+  canvas.__zbCanvas = c
+  return c
+}
+
+// Scanline rasteriser with a 1/z depth buffer. Faces are convex polygons, so a
+// scanline crosses each at most twice; interpolating 1/z along the span is
+// exact for a perspective projection. Returns the colour buffer plus the index
+// of the face that owns each pixel, which the label pass uses for visibility.
+function zRaster(items, rw, rh) {
+  const px = new Uint32Array(rw * rh)
+  const zb = new Float32Array(rw * rh)
+  const owner = new Int32Array(rw * rh).fill(-1)
+  let painted = 0
+  for (let fi = 0; fi < items.length; fi += 1) {
+    const pts = items[fi].pts
+    const col = items[fi].rgb
+    const n = pts.length
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < n; i += 1) {
+      const p = pts[i]
+      if (p[0] < minX) minX = p[0]
+      if (p[0] > maxX) maxX = p[0]
+      if (p[1] < minY) minY = p[1]
+      if (p[1] > maxY) maxY = p[1]
+    }
+    const y0 = Math.max(0, Math.ceil(minY - 0.5))
+    const y1 = Math.min(rh - 1, Math.floor(maxY - 0.5))
+    const bx0 = Math.max(0, Math.ceil(minX - 0.5))
+    const bx1 = Math.min(rw - 1, Math.floor(maxX - 0.5))
+    if (y1 < y0 || bx1 < bx0) continue
+    for (let y = y0; y <= y1; y += 1) {
+      const sy = y + 0.5
+      let xl = Infinity
+      let xr = -Infinity
+      let wl = 0
+      let wr = 0
+      for (let i = 0; i < n; i += 1) {
+        const a = pts[i]
+        const b = pts[i + 1 === n ? 0 : i + 1]
+        if ((a[1] <= sy && b[1] > sy) || (b[1] <= sy && a[1] > sy)) {
+          const t = (sy - a[1]) / (b[1] - a[1])
+          const x = a[0] + (b[0] - a[0]) * t
+          const wi = a[2] + (b[2] - a[2]) * t
+          if (x < xl) { xl = x; wl = wi }
+          if (x > xr) { xr = x; wr = wi }
+        }
+      }
+      if (!(xl <= xr)) continue
+      const sx0 = Math.max(bx0, Math.ceil(xl - 0.5))
+      const sx1 = Math.min(bx1, Math.floor(xr - 0.5))
+      if (sx1 < sx0) continue
+      const span = xr - xl
+      const dw = span > 1e-9 ? (wr - wl) / span : 0
+      let wi = wl + dw * (sx0 + 0.5 - xl)
+      let idx = y * rw + sx0
+      for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw) {
+        if (wi > zb[idx]) {
+          zb[idx] = wi
+          px[idx] = col
+          owner[idx] = fi
+          painted += 1
+        }
+      }
+    }
+  }
+  return { px, zb, owner, painted }
 }
 
 function shadeColor(hex, factor, alpha) {
@@ -1736,4 +1820,4 @@ export default {
 }
 
 // Exported for the Node test harness only; the loader uses `default`.
-export const __test__ = { facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS }
+export const __test__ = { facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, zRaster, packShaded, InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS }

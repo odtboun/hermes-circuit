@@ -167,15 +167,29 @@ assert.ok(r2.calls.stroke > 20)
 const bodies = view.components.filter((c) => c.body && c.body.w > 0 && c.body.h > 0).length
 assert.ok(r2.calls.fillText >= bodies, `every part with a body gets a designator (${r2.calls.fillText}/${bodies})`)
 
+// ---- the 3D view resolves depth per pixel, not by sorting ---------------- //
+// Two overlapping quads: the nearer one must win at the overlap, and the result
+// must not depend on the order they are handed to the rasteriser. A painter's
+// algorithm fails this test; that failure is the "parts go through each other"
+// bug on boards with a tall part over the whole layout (CM5 MINIMA).
+const quad = (x0, y0, x1, y1, w) => [[x0, y0, w], [x1, y0, w], [x1, y1, w], [x0, y1, w]]
+const far = { pts: quad(2, 2, 18, 18, 1 / 50), rgb: 0xff0000ff, depth: 50 }
+const near = { pts: quad(8, 8, 12, 12, 1 / 10), rgb: 0xff00ff00, depth: 10 }
+const a1 = __test__.zRaster([far, near], 20, 20)
+const a2 = __test__.zRaster([near, far], 20, 20)
+const mid = 10 * 20 + 10
+assert.equal(a1.px[mid] >>> 0, 0xff00ff00, 'the nearer quad must own the overlap')
+assert.equal(a2.px[mid] >>> 0, a1.px[mid] >>> 0, 'depth order must not depend on paint order')
+assert.equal(a1.px[3 * 20 + 3] >>> 0, 0xff0000ff, 'the far quad still shows outside the overlap')
+
 const r3 = recordingContext()
 __test__.drawBoard3D(r3.ctx, view, { canvas, dpr: 2, explode: false, alpha: 1, yaw: -0.6, pitch: 0.9, dist: 120 })
-assert.ok(r3.calls.lineTo > 100, 'facets should be projected and filled')
-// Backface culling paints only the faces turned towards the camera, so the fill
-// count is a fraction of the facet count — not all of it. A closed prism soup
-// loses roughly half; anything near zero means culling inverted, anything at the
-// full count means it stopped happening.
-assert.ok(r3.calls.fill > faces.length * 0.25, `too few faces painted (${r3.calls.fill}/${faces.length}) — culling inverted?`)
-assert.ok(r3.calls.fill < faces.length, `every face painted (${r3.calls.fill}/${faces.length}) — culling is off`)
+const st = canvas.__stats
+assert.ok(st && st.faces > 100, 'drawBoard3D reports its facet count')
+assert.ok(st.drawn > 100, `too few faces survived culling (${st.drawn}/${st.faces}) — culling inverted?`)
+assert.ok(st.drawn < st.faces, `every face drawn (${st.drawn}/${st.faces}) — culling is off`)
+assert.ok(st.painted > 5000, `rasteriser wrote too few pixels (${st.painted})`)
+assert.equal(r3.calls.putImageData, 1, 'the rasterised frame is composited once')
 
 // ---- components render without a browser --------------------------------- //
 // Minimal renderer: executes function components (hooks are stubbed) and
