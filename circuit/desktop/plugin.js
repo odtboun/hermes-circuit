@@ -60,6 +60,56 @@ const PART_COLORS = {
   default: '#20262a'
 }
 
+// Footprint/part name -> a plausible body silhouette and height. A real 3D
+// viewer loads a STEP/VRML model per footprint (KiCad ships one for every
+// library part); without a mesh renderer the honest cheap win is the right
+// SHAPE and the right HEIGHT per part family, instead of every part being a
+// 0.45 mm slab. Ordered: first match wins.
+const BODY_SHAPES = [
+  [/^(cp-|.*electrolyt|.*radial|.*alu)/i, { sides: 16, z: 5.5 }],
+  [/led/i, { sides: 12, z: 0.9 }],
+  [/relay|srd|g5|omron/i, { sides: 4, z: 12 }],
+  [/crystal|xtal|resonator/i, { sides: 4, z: 1.1 }],
+  [/usb|jst|barrel|screw|terminal|rj45|jack/i, { sides: 8, z: 7 }],
+  [/pico|nano|module|arduino|feather|esp32|wroom/i, { sides: 4, z: 6 }],
+  [/header|pinhead|pin-socket/i, { sides: 4, z: 2.5 }],
+  [/soic|tssop|qfn|sot|msop|ssop|bga|dfn/i, { sides: 4, z: 1.4 }],
+  [/0402|0603|0805|1206|1210/i, { sides: 8, z: 0.55 }],
+  [/sod|sma|smb|smc|do-|dip/i, { sides: 4, z: 1.6 }],
+]
+
+function bodyProfile(comp) {
+  const key = `${comp.part || ''} ${comp.footprint || ''} ${comp.value || ''}`
+  for (const [re, shape] of BODY_SHAPES) if (re.test(key)) return shape
+  const z = (comp.body || {}).z
+  return { sides: 4, z: z || 1 }
+}
+
+/** Body outline in world mm: a true rectangle for 4 sides, else an ellipse
+ *  inscribed in the footprint box (cylinder for 12-16, chamfer for 8). */
+function bodyPolygon(comp, prof) {
+  const b = comp.body || {}
+  const rot = ((comp.rot || 0) * Math.PI) / 180
+  const hw = b.w / 2
+  const hh = b.h / 2
+  const cos = Math.cos(rot)
+  const sin = Math.sin(rot)
+  const out = []
+  if (prof.sides <= 4) {
+    for (const [lx, ly] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
+      out.push([comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos])
+    }
+    return out
+  }
+  for (let i = 0; i < prof.sides; i += 1) {
+    const a = (i / prof.sides) * Math.PI * 2 + Math.PI / prof.sides
+    const lx = Math.cos(a) * hw
+    const ly = Math.sin(a) * hh
+    out.push([comp.x + lx * cos - ly * sin, comp.y + lx * sin + ly * cos])
+  }
+  return out
+}
+
 const UI = {
   text: 'var(--ui-text, #e8e4d8)',
   dim: 'var(--ui-text-secondary, #9aa39c)',
@@ -323,15 +373,17 @@ function drawBoard2D(g, view, opts) {
     for (const c of view.components) {
       const b = c.body || { w: 0, h: 0 }
       if (!b.w || !b.h) continue
-      g.save()
-      g.translate(c.x, c.y)
-      g.rotate((c.rot * Math.PI) / 180)
-      g.strokeStyle = 'rgba(255,255,255,0.28)'
+      const prof = bodyProfile(c)
+      const poly = bodyPolygon(c, prof)
+      g.beginPath()
+      g.moveTo(poly[0][0], poly[0][1])
+      for (let i = 1; i < poly.length; i += 1) g.lineTo(poly[i][0], poly[i][1])
+      g.closePath()
+      g.fillStyle = 'rgba(18,22,20,0.55)'
+      g.fill()
+      g.strokeStyle = 'rgba(255,255,255,0.32)'
       g.lineWidth = Math.max(0.08, px * 0.8)
-      g.setLineDash([0.5, 0.4])
-      g.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h)
-      g.setLineDash([])
-      g.restore()
+      g.stroke()
       if (t.k > 9) {
         g.save()
         g.translate(c.x, c.y - (b.h / 2 + 1.4))
@@ -476,29 +528,19 @@ function facetsFor(view, opts) {
     }
   }
 
-  // component bodies
+  // component bodies, as prisms: rectangle / chamfered / cylindrical by family
   for (const comp of view.components) {
     const b = comp.body || {}
-    if (!b.w || !b.h || !b.z) continue
-    const rot = (comp.rot * Math.PI) / 180
-    const hw = b.w / 2
-    const hh = b.h / 2
-    const corners = [
-      [-hw, -hh],
-      [hw, -hh],
-      [hw, hh],
-      [-hw, hh]
-    ].map((p) => [
-      comp.x + p[0] * Math.cos(rot) - p[1] * Math.sin(rot),
-      comp.y + p[0] * Math.sin(rot) + p[1] * Math.cos(rot)
-    ])
+    if (!b.w || !b.h) continue
+    const prof = bodyProfile(comp)
+    const corners = bodyPolygon(comp, prof)
     const z0 = th + 0.06
-    const z1 = z0 + b.z
+    const z1 = z0 + Math.max(0.3, prof.z || b.z || 1)
     const color = PART_COLORS[b.color] || PART_COLORS.default
     pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3)
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < corners.length; i += 1) {
       const p = corners[i]
-      const q = corners[(i + 1) % 4]
+      const q = corners[(i + 1) % corners.length]
       const n = [q[1] - p[1], -(q[0] - p[0]), 0]
       pushPoly(
         [
