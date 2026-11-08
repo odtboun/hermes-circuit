@@ -82,3 +82,27 @@ def test_network_failure_is_reported_not_raised_raw(monkeypatch, tmp_path):
     with pytest.raises(BoardError) as exc:
         samples.fetch("video", tmp_path / "video.kicad_pcb")
     assert "could not download" in str(exc.value)
+
+
+def test_reloading_a_sample_replaces_the_same_project(monkeypatch):
+    """A sample downloads to a fresh temp path each time; the slug must not drift."""
+    from circuit_core import store
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
+
+    def fake_fetch(sample_id, dest):
+        dest.write_bytes(fixture.read_bytes())
+        return dest
+
+    monkeypatch.setattr(samples, "fetch", fake_fetch)
+
+    first = samples.load("pic-programmer")
+    second = samples.load("pic-programmer")
+
+    assert first["board"] == "pic-programmer"
+    assert second["board"] == first["board"], "re-load created a -2 copy"
+    assert [b["slug"] for b in store.list_boards()] == ["pic-programmer"]
+    # imported boards must not claim to be routable/editable
+    from circuit_core import store as s2
+
+    assert s2.load("pic-programmer").data["imported"] is True

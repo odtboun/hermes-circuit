@@ -116,10 +116,17 @@ def fetch(sample_id: str, dest: Path) -> Path:
 
 def load(sample_id: str) -> dict:
     """Fetch and import one sample, returning the importer summary."""
+    entry = SAMPLES.get(sample_id)
+    if entry is None:
+        raise BoardError(
+            f"unknown sample {sample_id!r} (one of: {', '.join(SAMPLES)})"
+        )
     with tempfile.TemporaryDirectory(prefix="circuit-sample-") as tmp:
         path = fetch(sample_id, Path(tmp) / f"{sample_id}.kicad_pcb")
-        summary = import_board(str(path))
+        # Stable slug + stable source identity: the download lives at a fresh temp
+        # path each time, which would otherwise create <id>-2, <id>-3, ...
+        summary = import_board(str(path), key=sample_id, source=_url(entry))
     summary["sample"] = sample_id
     summary["license"] = _LICENSE
-    summary["source"] = _url(SAMPLES[sample_id])
+    summary["source"] = _url(entry)
     return summary

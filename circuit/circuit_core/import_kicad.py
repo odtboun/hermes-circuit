@@ -811,8 +811,14 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
 # --------------------------------------------------------------------------- #
 # store side
 # --------------------------------------------------------------------------- #
-def import_board(path: str) -> dict:
-    """Import ``path`` into the project store and return a summary."""
+def import_board(path: str, key: Optional[str] = None, source: Optional[str] = None) -> dict:
+    """Import ``path`` into the project store and return a summary.
+
+    ``key`` overrides the project slug and ``source`` the identity recorded in
+    the board metadata; together they let a caller with an unstable local path
+    (a sample downloaded to a temp file) re-import over the same project instead
+    of piling up ``-2`` copies.
+    """
     raw = (path or "").strip()
     if not raw:
         raise BoardError("path is required")
@@ -825,20 +831,23 @@ def import_board(path: str) -> dict:
         raise BoardError(f"no file at {p}")
 
     board, doc, warnings = parse_board(p)
-    slug = store.slugify(p.stem)
+    identity = source or str(p)
+    base = key or p.stem
+    slug = store.slugify(base)
     root = store.projects_dir() / slug
     if root.exists():
         try:
             previous = json.loads((root / "board.json").read_text())
         except Exception:
             previous = {}
-        same_source = ((previous.get("meta") or {}).get("source") == str(p))
+        same_source = ((previous.get("meta") or {}).get("source") == identity)
         if previous.get("imported") and same_source:
             shutil.rmtree(root)          # re-import replaces the previous copy
         else:
-            slug = store.unique_slug(p.stem)
+            slug = store.unique_slug(base)
 
     board.data["slug"] = slug
+    board.data["meta"]["source"] = identity
     doc["slug"] = slug
     store.save(board, make_slug=False)
     store.write_view(slug, doc)
