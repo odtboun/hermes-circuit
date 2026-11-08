@@ -53,7 +53,12 @@ def test_rotated_footprint_lands_where_kicad_puts_it():
     assert (round(pin1["x"], 2), round(pin1["y"], 2)) == (22.46, 6.19)
     assert u1["rot"] == 270.0
     r1 = next(c for c in doc["components"] if c["ref"] == "R1")
-    assert round(r1["body"]["w"], 3) == 2.85
+    # The body is the part outline (2.0 mm for an 0805), not the pad box (2.85 mm):
+    # deriving it from the pads swallowed the terminations, so imported boards
+    # rendered as bare boxes with no metal on them.
+    assert round(r1["body"]["w"], 3) == 2.0
+    pad_span = max(p["x"] + p["w"] / 2 for p in r1["pins"]) - min(p["x"] - p["w"] / 2 for p in r1["pins"])
+    assert pad_span > r1["body"]["w"], "pads must stick out past the body" 
 
 
 def test_import_tool_creates_and_replaces_the_project():

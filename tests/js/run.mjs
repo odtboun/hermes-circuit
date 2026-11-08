@@ -110,6 +110,28 @@ assert.ok(exploded.length === faces.length, 'explode must not change the facet c
 assert.ok(exploded.every((f, i) => f.pts[0][2] >= faces[i].pts[0][2] - 1e-9))
 assert.match(__test__.shadeColor('#804020', 0.5, 1), /^rgba\(/)
 
+// ---- geometry budget ----------------------------------------------------- //
+// The 3D pass repaints every face on each pointermove, so the face count is the
+// thing that decides whether dragging stays smooth: ~7k faces measured 18 ms
+// warm in Chrome, 450 faces 2 ms. A synthetic dense board guards both the count
+// and any accidental super-linear work in facetsFor.
+const dense = {
+  ...view,
+  components: Array.from({ length: 240 }, (_, i) => {
+    const src = view.components[i % view.components.length]
+    return { ...src, ref: `D${i}`, x: 10 + (i % 20) * 2.2, y: 10 + Math.floor(i / 20) * 3.1 }
+  })
+}
+const tGeom = Date.now()
+const denseFaces = __test__.facetsFor(dense, { explode: false })
+const geomMs = Date.now() - tGeom
+assert.ok(denseFaces.length < 12000, `3D face budget exceeded: ${denseFaces.length} faces`)
+assert.ok(geomMs < 400, `facetsFor took ${geomMs} ms for 240 parts — check for super-linear work`)
+for (const f of denseFaces) {
+  assert.ok(['top', 'bottom', 'edge'].includes(f.side), `face missing a side: ${f.side}`)
+  assert.ok(Number.isFinite(f.rank), 'face missing a paint rank')
+}
+
 // ---- canvas renderers ---------------------------------------------------- //
 function recordingContext() {
   const calls = {}
@@ -190,6 +212,8 @@ console.log(JSON.stringify({
   ok: true,
   contributions: areas,
   facets: faces.length,
+  denseFaces: denseFaces.length,
+  denseGeomMs: geomMs,
   draw2d: r2.calls,
   draw3d: { fill: r3.calls.fill, lineTo: r3.calls.lineTo },
   components: view.components.length

@@ -544,7 +544,9 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
                 hw, hh = (w * c + h * s) / 2.0, (w * s + h * c) / 2.0
             local_pts.extend([(lx - hw, ly - hh), (lx + hw, ly + hh)])
 
+        silk_pts: List[Point] = []
         for layer_name, pts, width in _silk_polylines(fp):
+            silk_pts.extend(pts)
             local_pts.extend(pts)
             world_pts = [_kicad_place(p, origin, rot) for p in pts]
             silk_out[layer_name]["lines"].append({
@@ -559,11 +561,23 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         if pad_count == 0:
             continue
 
-        if local_pts:
-            xs = [p[0] for p in local_pts]
-            ys = [p[1] for p in local_pts]
-            bw, bh = max(xs) - min(xs), max(ys) - min(ys)
-            centre = _kicad_place(((min(xs) + max(xs)) / 2.0, (min(ys) + max(ys)) / 2.0), origin, rot)
+        # Body extent. Pads alone would swallow the part's own terminations (a
+        # footprint's pad row IS its widest feature), which is why imported boards
+        # showed no metal at all. When the silkscreen outline covers most of the
+        # pad box it is the real part body, so prefer it and let the pads stick
+        # out the way they do on a real board.
+        pad_box = _bbox(local_pts) if pad_count else None
+        silk_box = _bbox(silk_pts) if silk_pts else None
+        box = None
+        if pad_box and silk_box:
+            pad_area = max(1e-6, (pad_box[2] - pad_box[0]) * (pad_box[3] - pad_box[1]))
+            silk_area = (silk_box[2] - silk_box[0]) * (silk_box[3] - silk_box[1])
+            box = silk_box if 0.6 * pad_area <= silk_area <= 1.6 * pad_area else _union(pad_box, silk_box)
+        elif pad_box or silk_box:
+            box = pad_box or silk_box
+        if box:
+            bw, bh = box[2] - box[0], box[3] - box[1]
+            centre = _kicad_place(((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0), origin, rot)
         else:
             bw = bh = 0.0
             centre = origin
@@ -875,6 +889,16 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
 # --------------------------------------------------------------------------- #
 # store side
 # --------------------------------------------------------------------------- #
+def _bbox(pts: List[Point]):
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _union(a, b):
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
 def import_board(path: str, key: Optional[str] = None, source: Optional[str] = None) -> dict:
     """Import ``path`` into the project store and return a summary.
 

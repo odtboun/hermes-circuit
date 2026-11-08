@@ -47,42 +47,72 @@ const C = {
   bodyEdge: '#39443d'
 }
 
+// Part body colours, by material family. These are the real ones: black epoxy
+// for ICs, dark grey-brown resistor bodies, tan MLCCs, silver aluminium cans,
+// cream connector shells. Anything unknown stays a neutral dark grey.
 const PART_COLORS = {
-  passive: '#2a2f2c',
-  ic: '#14181a',
+  passive: '#33302c',
+  ceramic: '#8a6b4f',
+  ic: '#1d1f21',
   module: '#16342c',
-  connector: '#d7d2c4',
-  electrolytic: '#243036',
-  metal: '#8f8f8f',
-  led: '#7a2f2f',
+  connector: '#ddd8c8',
+  electrolytic: '#b9bcc0',
+  metal: '#b9bcc0',
+  led: '#8a3a3a',
   relay: '#2c3a44',
+  crystal: '#c8ccd0',
+  header: '#1b1d1f',
   hole: '#000000',
-  default: '#20262a'
+  default: '#26282b'
 }
+
+// Plated metal: solder fillets, part terminations, connector pins.
+const METAL = '#cfd3d8'
 
 // Footprint/part name -> a plausible body silhouette and height. A real 3D
 // viewer loads a STEP/VRML model per footprint (KiCad ships one for every
 // library part); without a mesh renderer the honest cheap win is the right
 // SHAPE and the right HEIGHT per part family, instead of every part being a
 // 0.45 mm slab. Ordered: first match wins.
-const BODY_SHAPES = [
-  [/^(cp-|.*electrolyt|.*radial|.*alu)/i, { sides: 16, z: 5.5 }],
-  [/led/i, { sides: 12, z: 0.9 }],
-  [/relay|srd|g5|omron/i, { sides: 4, z: 12 }],
-  [/crystal|xtal|resonator/i, { sides: 4, z: 1.1 }],
-  [/usb|jst|barrel|screw|terminal|rj45|jack/i, { sides: 8, z: 7 }],
-  [/pico|nano|module|arduino|feather|esp32|wroom/i, { sides: 4, z: 6 }],
-  [/header|pinhead|pin-socket/i, { sides: 4, z: 2.5 }],
-  [/soic|tssop|qfn|sot|msop|ssop|bga|dfn/i, { sides: 4, z: 1.4 }],
-  [/0402|0603|0805|1206|1210/i, { sides: 8, z: 0.55 }],
-  [/sod|sma|smb|smc|do-|dip/i, { sides: 4, z: 1.6 }],
+// Footprint/part name -> silhouette, height and material. A real 3D viewer loads
+// a STEP/VRML model per footprint; without a mesh renderer the honest cheap win
+// is the right shape, height and colour per family. First match wins, so the
+// specific patterns (electrolytic, capacitor, resistor) come before the size
+// patterns that would otherwise catch every 0805.
+const BODY_FAMILIES = [
+  [/^(cp-|cp_|.*electrolyt|.*radial|.*alu|.*can)/i, { sides: 16, z: 5.5, color: 'electrolytic', family: 'can' }],
+  [/led|ws2812|neopixel/i, { sides: 12, z: 0.9, color: 'led', family: 'led' }],
+  [/relay|srd|g5v|omron/i, { sides: 4, z: 12, color: 'relay', family: 'relay' }],
+  [/crystal|xtal|resonator/i, { sides: 4, z: 1.1, color: 'crystal', family: 'crystal' }],
+  [/usb|jst|barrel|screw|terminal|rj45|jack|conn/i, { sides: 8, z: 7, color: 'connector', family: 'connector' }],
+  [/pico|nano|module|arduino|feather|esp32|wroom|stm32|rp2040/i, { sides: 4, z: 6, color: 'module', family: 'module' }],
+  [/header|pinhead|pin-?socket/i, { sides: 4, z: 2.5, color: 'header', family: 'header' }],
+  [/capacitor|cap_|c_0|mlcc|ceramic/i, { sides: 8, z: 0.55, color: 'ceramic', family: 'passive' }],
+  [/resistor|res_|r_0/i, { sides: 8, z: 0.55, color: 'passive', family: 'passive' }],
+  [/soic|tssop|qfn|sot|msop|ssop|bga|dfn|dip/i, { sides: 4, z: 1.4, color: 'ic', family: 'ic' }],
+  [/sod|sma|smb|smc|do-/i, { sides: 4, z: 1.6, color: 'ic', family: 'diode' }],
+  [/0402|0603|0805|1206|1210/i, { sides: 8, z: 0.55, color: 'passive', family: 'passive' }],
 ]
 
 function bodyProfile(comp) {
   const key = `${comp.part || ''} ${comp.footprint || ''} ${comp.value || ''}`
-  for (const [re, shape] of BODY_SHAPES) if (re.test(key)) return shape
-  const z = (comp.body || {}).z
-  return { sides: 4, z: z || 1 }
+  for (const [re, shape] of BODY_FAMILIES) if (re.test(key)) return shape
+  const b = comp.body || {}
+  return { sides: 4, z: b.z || 1, color: b.color || 'default', family: 'other' }
+}
+
+/** Resolved body colour: the inferred family wins, then the engine's own hint. */
+function bodyColor(comp, prof) {
+  return PART_COLORS[prof.color] || PART_COLORS[(comp.body || {}).color] || PART_COLORS.default
+}
+
+/** Ink that reads on top of a body colour (etched marking / designator). */
+function inkFor(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return '#101312'
+  const n = parseInt(m[1], 16)
+  const lum = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
+  return lum > 128 ? '#101312' : '#e9ecea'
 }
 
 /** Body outline in world mm: a true rectangle for 4 sides, else an ellipse
@@ -435,14 +465,15 @@ function facetsFor(view, opts) {
   // orders the sheets on one side; drawBoard3D turns the pair into a paint order
   // for whichever side currently faces the camera, so the board can be turned all
   // the way over and its underside renders correctly too.
-  const pushPoly = (pts3, color, normalHint, liftAmount, side, rank) => {
+  const pushPoly = (pts3, color, normalHint, liftAmount, side, rank, extra) => {
     if (!pts3 || pts3.length < 3) return
     faces.push({
       pts: pts3.map((p) => [p[0], p[1], p[2] + liftAmount]),
       color,
       n: normalHint,
       side,
-      rank
+      rank,
+      ...(extra || {})
     })
   }
 
@@ -528,16 +559,28 @@ function facetsFor(view, opts) {
     }
   }
 
-  // component bodies, as prisms: rectangle / chamfered / cylindrical by family
+  // Component bodies, as prisms: rectangle / chamfered / cylindrical by family.
+  // Each part also gets a contact shadow, its designator etched on the top face,
+  // a pin-1 dot, and metal on it: terminations for two-terminal parts, visible
+  // leads for everything else. Without the metal a part reads as a bare box,
+  // because its pads sit underneath it.
   for (const comp of view.components) {
     const b = comp.body || {}
     if (!b.w || !b.h) continue
     const prof = bodyProfile(comp)
+    const color = bodyColor(comp, prof)
     const corners = bodyPolygon(comp, prof)
     const z0 = th + 0.06
     const z1 = z0 + Math.max(0.3, prof.z || b.z || 1)
-    const color = PART_COLORS[b.color] || PART_COLORS.default
-    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3)
+    const pins = comp.pins || []
+
+    // shadow: same footprint at the body's base, offset in screen space at draw
+    pushPoly(corners.map((p) => [p[0], p[1], z0]), '#000000', [0, 0, 1], 0, 'top', 2.5, { shadow: true })
+
+    pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3, {
+      label: { text: comp.ref, w: b.w, h: b.h, ink: inkFor(color) },
+      pin1: pins.length ? [pins[0].x, pins[0].y, z1 + 0.01] : null
+    })
     for (let i = 0; i < corners.length; i += 1) {
       const p = corners[i]
       const q = corners[(i + 1) % corners.length]
@@ -556,8 +599,112 @@ function facetsFor(view, opts) {
         3
       )
     }
+
+    // ---- metal -----------------------------------------------------------
+    const rot = ((comp.rot || 0) * Math.PI) / 180
+    const ax = [Math.cos(rot), Math.sin(rot)]          // along the body's length
+    const px = [-Math.sin(rot), Math.cos(rot)]         // across it
+    const hx = (Math.abs(ax[0]) * b.w + Math.abs(ax[1]) * b.h) / 2
+    const hp = (Math.abs(px[0]) * b.w + Math.abs(px[1]) * b.h) / 2
+    const at = (a, p2, z) => [comp.x + ax[0] * a + px[0] * p2, comp.y + ax[1] * a + px[1] * p2, z]
+
+    if (pins.length === 2) {
+      // two-terminal part: a metal cap wrapping each end (what you actually see
+      // on a resistor or capacitor), 22% of the body length per end.
+      const capLen = Math.min(Math.max(hx * 0.44, 0.22), 1.0)
+      for (const side of [-1, 1]) {
+        const a0 = side * (hx - capLen)
+        const a1 = side * hx
+        pushPoly(
+          [at(a0, -hp, z1 + 0.004), at(a1, -hp, z1 + 0.004), at(a1, hp, z1 + 0.004), at(a0, hp, z1 + 0.004)],
+          METAL,
+          [0, 0, 1],
+          lift,
+          'top',
+          3.5
+        )
+        pushPoly(
+          [at(a1, -hp, z0 + 0.02), at(a1, hp, z0 + 0.02), at(a1, hp, z1), at(a1, -hp, z1)],
+          METAL,
+          [side * ax[0], side * ax[1], 0],
+          lift,
+          'top',
+          3.5
+        )
+      }
+    } else {
+      // multi-terminal part: draw the leads that actually poke out past the body
+      for (const pin of pins) {
+        const pw = pin.w || 0.4
+        const ph = pin.h || 0.4
+        const dx = pin.x - comp.x
+        const dy = pin.y - comp.y
+        const a = dx * ax[0] + dy * ax[1]
+        const c = dx * px[0] + dy * px[1]
+        const alongAxis = Math.abs(a) >= Math.abs(c)
+        const u = alongAxis ? ax : px
+        const v = alongAxis ? px : ax
+        const offU = alongAxis ? a : c
+        const offV = alongAxis ? c : a
+        const bodyHalf = alongAxis ? hx : hp
+        const side = offU < 0 ? -1 : 1
+        const padHalfU = (Math.abs(u[0]) * pw + Math.abs(u[1]) * ph) / 2
+        const padHalfV = (Math.abs(v[0]) * pw + Math.abs(v[1]) * ph) / 2
+        const outerU = offU + side * padHalfU
+        if (Math.abs(outerU) <= bodyHalf + 0.02) continue   // hidden under the body
+        const innerU = side * bodyHalf
+        const zLead = th + 0.045
+        const atUV = (uAmt, vAmt) => [
+          comp.x + u[0] * uAmt + v[0] * vAmt,
+          comp.y + u[1] * uAmt + v[1] * vAmt,
+          zLead
+        ]
+        pushPoly(
+          [atUV(innerU, offV - padHalfV), atUV(outerU, offV - padHalfV), atUV(outerU, offV + padHalfV), atUV(innerU, offV + padHalfV)],
+          METAL,
+          [0, 0, 1],
+          lift,
+          'top',
+          3.5
+        )
+      }
+    }
   }
   return faces
+}
+
+/** Etch a designator onto a projected top face.
+
+ * The face is a parallelogram, so an affine transform built from three of its
+ * corners puts the text on the board at the right size and angle — it zooms and
+ * turns with the part instead of floating above it.
+ */
+function drawFaceLabel(g, pts, label) {
+  if (!label || !label.text || pts.length < 4) return
+  const p0 = pts[0]
+  const p1 = pts[1]
+  const p3 = pts[3]
+  const ex = [p1[0] - p0[0], p1[1] - p0[1]]
+  // local +y runs from the last corner back to the first, which is screen-down,
+  // so the glyphs stay upright when the board is seen from above
+  const ey = [p0[0] - p3[0], p0[1] - p3[1]]
+  const lenX = Math.hypot(ex[0], ex[1])
+  const lenY = Math.hypot(ey[0], ey[1])
+  if (lenX < 15 || lenY < 8) return          // too small to read: leave it clean
+  if (ex[0] * ey[1] - ex[1] * ey[0] <= 0) return   // mirrored / facing away
+  const W = Math.max(0.01, label.w)
+  const H = Math.max(0.01, label.h)
+  const size = Math.min(H * 0.52, W * 0.3, 2.6)
+  if (size <= 0.05) return
+  g.save()
+  g.transform(ex[0] / W, ex[1] / W, ey[0] / H, ey[1] / H, p0[0], p0[1])
+  g.font = `${size}px ui-sans-serif, system-ui, sans-serif`
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  g.fillStyle = label.ink
+  g.globalAlpha = 0.8
+  g.fillText(label.text, W / 2, H / 2)
+  g.restore()
 }
 
 function drawBoard3D(g, view, opts) {
@@ -623,8 +770,8 @@ function drawBoard3D(g, view, opts) {
   // past vertical puts the camera under it, so the pass sequence is mirrored.
   const underside = Math.cos(opts.pitch || 0) < 0
   const sequence = underside
-    ? [['top', 3], ['top', 2], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 2]]
-    : [['bottom', 2], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 2], ['top', 3]]
+    ? [['top', 3.5], ['top', 3], ['top', 2.5], ['top', 2], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 2]]
+    : [['bottom', 2], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 2], ['top', 2.5], ['top', 3], ['top', 3.5]]
   const passes = new Map()
   for (const item of prepared) {
     const key = `${item.f.side}:${item.f.rank}`
@@ -649,15 +796,37 @@ function drawBoard3D(g, view, opts) {
     // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
     // into near-black, which read as "empty" next to reference renders.
     const shade = 0.68 + 0.32 * lambert
+
+    if (f.shadow) {
+      // part contact shadow: same footprint, pushed down-right on screen
+      g.beginPath()
+      g.moveTo(pts[0][0] + 2.5, pts[0][1] + 4)
+      for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0] + 2.5, pts[i][1] + 4)
+      g.closePath()
+      g.fillStyle = 'rgba(0,0,0,0.30)'
+      g.fill()
+      continue
+    }
+
     g.beginPath()
     g.moveTo(pts[0][0], pts[0][1])
     for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0], pts[i][1])
     g.closePath()
     g.fillStyle = shadeColor(f.color, shade, opts.alpha || 1)
     g.fill()
-    g.strokeStyle = 'rgba(0,0,0,0.18)'
-    g.lineWidth = 0.6
-    g.stroke()
+    // No per-face black stroke: at a few thousand faces the outline pass is what
+    // made the board look inked-in. Shading separates faces on its own.
+
+    if (f.pin1) {
+      const dot = project(f.pin1)
+      if (dot) {
+        g.beginPath()
+        g.arc(dot[0], dot[1], 2.2, 0, Math.PI * 2)
+        g.fillStyle = 'rgba(0,0,0,0.45)'
+        g.fill()
+      }
+    }
+    if (f.label) drawFaceLabel(g, pts, f.label)
   }
 }
 
