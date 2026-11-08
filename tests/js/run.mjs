@@ -170,7 +170,12 @@ assert.ok(r2.calls.fillText >= bodies, `every part with a body gets a designator
 const r3 = recordingContext()
 __test__.drawBoard3D(r3.ctx, view, { canvas, dpr: 2, explode: false, alpha: 1, yaw: -0.6, pitch: 0.9, dist: 120 })
 assert.ok(r3.calls.lineTo > 100, 'facets should be projected and filled')
-assert.ok(r3.calls.fill >= faces.length - 5, 'each visible facet is filled')
+// Backface culling paints only the faces turned towards the camera, so the fill
+// count is a fraction of the facet count — not all of it. A closed prism soup
+// loses roughly half; anything near zero means culling inverted, anything at the
+// full count means it stopped happening.
+assert.ok(r3.calls.fill > faces.length * 0.25, `too few faces painted (${r3.calls.fill}/${faces.length}) — culling inverted?`)
+assert.ok(r3.calls.fill < faces.length, `every face painted (${r3.calls.fill}/${faces.length}) — culling is off`)
 
 // ---- components render without a browser --------------------------------- //
 // Minimal renderer: executes function components (hooks are stubbed) and

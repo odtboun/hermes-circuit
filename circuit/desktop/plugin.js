@@ -487,6 +487,13 @@ function facetsFor(view, opts) {
   // orders the sheets on one side; drawBoard3D turns the pair into a paint order
   // for whichever side currently faces the camera, so the board can be turned all
   // the way over and its underside renders correctly too.
+  // `obj` groups the faces of one physical object (a part, the board, the copper
+  // sheet, ...). drawBoard3D paints whole objects in depth order, so two parts
+  // that overlap can never interleave face-by-face.
+  let currentObject = 'board'
+  const setObject = (name) => {
+    currentObject = name
+  }
   const pushPoly = (pts3, color, normalHint, liftAmount, side, rank, extra) => {
     if (!pts3 || pts3.length < 3) return
     faces.push({
@@ -495,6 +502,7 @@ function facetsFor(view, opts) {
       n: normalHint,
       side,
       rank,
+      obj: currentObject,
       ...(extra || {})
     })
   }
@@ -522,6 +530,7 @@ function facetsFor(view, opts) {
   pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 'top', 0)
 
   // copper traces as thin plates on each copper side
+  setObject('copper')
   for (const layerId of ['F.Cu', 'B.Cu']) {
     const layer = view.copper[layerId]
     if (!layer) continue
@@ -556,6 +565,7 @@ function facetsFor(view, opts) {
   }
 
   // pads as thin plates on both copper sides
+  setObject('pads')
   for (const layerId of ['F.Cu', 'B.Cu']) {
     const layer = view.copper[layerId]
     if (!layer) continue
@@ -587,6 +597,7 @@ function facetsFor(view, opts) {
   // at board scale they are sub-pixel, and the designators are etched on the
   // parts anyway.
   if (showSilk) {
+    setObject('silk')
     for (const [key, z, side, color] of [['F.SilkS', th + 0.03, 'top', C.silk], ['B.SilkS', -0.03, 'bottom', '#9aa39c']]) {
       const layer = view.silk[key]
       if (!layer) continue
@@ -621,6 +632,7 @@ function facetsFor(view, opts) {
   // drilled holes: a dark disc in each pad, so through-hole pads read as pads
   // with a hole instead of solid gold blobs
   if (showDrills) {
+    setObject('drills')
     for (const d of view.drills || []) {
       const r = Math.max((d.d || 0.8) / 2, 0.15)
       const pts = []
@@ -638,6 +650,7 @@ function facetsFor(view, opts) {
   // leads for everything else. Without the metal a part reads as a bare box,
   // because its pads sit underneath it.
   for (const comp of showParts ? view.components : []) {
+    setObject(`part:${comp.ref}`)
     const b = comp.body || {}
     if (!b.w || !b.h) continue
     const prof = bodyProfile(comp)
@@ -864,10 +877,35 @@ function drawBoard3D(g, view, opts) {
     if (!passes.has(key)) passes.set(key, [])
     passes.get(key).push(item)
   }
+  // Inside a pass, paint whole OBJECTS back-to-front and only then order faces
+  // within an object. Sorting every face by average depth let a small part's
+  // faces slip between the faces of a big one it sits inside — the "parts go
+  // through each other" look on boards with overlapping footprints (CM5 MINIMA
+  // has two 40x55 mm module bodies stacked on an M.2 socket).
+  const byObject = (bucket) => {
+    const groups = new Map()
+    for (const item of bucket) {
+      const key = item.f.obj || 'misc'
+      if (!groups.has(key)) groups.set(key, { key, sum: 0, n: 0, items: [] })
+      const grp = groups.get(key)
+      grp.sum += item.depth
+      grp.n += 1
+      grp.items.push(item)
+    }
+    const ordered = [...groups.values()].sort((a, b) => {
+      const da = a.sum / a.n
+      const db = b.sum / b.n
+      if (Math.abs(da - db) > 1e-6) return db - da          // farther first
+      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0      // stable tie-break
+    })
+    const out = []
+    for (const grp of ordered) out.push(...grp.items.sort((a, b) => b.depth - a.depth))
+    return out
+  }
   const ordered = []
   for (const [side, rank] of sequence) {
     const bucket = passes.get(`${side}:${rank}`)
-    if (bucket) ordered.push(...bucket.sort((a, b) => b.depth - a.depth))
+    if (bucket) ordered.push(...byObject(bucket))
   }
 
   for (const item of ordered) {
@@ -878,6 +916,10 @@ function drawBoard3D(g, view, opts) {
     // [dy, -dx, 0], magnitude ~20 mm), so the raw dot product reached 5-7 and
     // every side face saturated to pure white over the pads and part bodies.
     const len = Math.hypot(rn[0], rn[1], rn[2]) || 1
+    // Cull faces pointing away from the camera (it sits on +z looking down -z).
+    // Without it every box also painted its four far-side walls, so you could
+    // read the inside of a part through the one in front of it.
+    if (rn[2] / len <= 0) continue
     const lambert = Math.max(0, (rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2]) / len)
     // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
     // into near-black, which read as "empty" next to reference renders.
