@@ -116,6 +116,14 @@ function recordingContext() {
   const handler = {
     get(target, prop) {
       if (prop in target) return target[prop]
+      // create* factory methods (gradients, patterns) hand back an object with
+      // its own API — return a stub instead of an undefined function result.
+      if (typeof prop === 'string' && prop.startsWith('create')) {
+        return (...args) => {
+          calls[prop] = (calls[prop] || 0) + 1
+          return { addColorStop() {}, setTransform() {} }
+        }
+      }
       return (...args) => { calls[prop] = (calls[prop] || 0) + 1 }
     },
     set(target, prop, value) { target[prop] = value; return true }

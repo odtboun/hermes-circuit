@@ -27,15 +27,21 @@ const ID = 'circuit'
 const ROUTE = '/circuit'
 
 // Physical board colours (a PCB is green/copper regardless of the app theme).
+// Reads as a real HASL board: green mask over the copper, gold-exposed pads,
+// warm off-white silk. Traces are NOT bare copper — under mask they read as a
+// lighter green than the substrate, which is what makes a render look like a
+// board instead of an orange drawing.
 const C = {
-  substrate: '#0e3527',
-  substrateEdge: '#d7b56b',
-  copperTop: '#d4783f',
-  copperBottom: '#4d7ba4',
-  silk: '#efe9da',
-  drill: '#07110c',
-  mask: '#0a2a1d',
-  gold: '#d9b45f',
+  substrate: '#0c3a29',
+  substrateEdge: '#d8b877',
+  trace: '#2f7d5b',
+  traceBottom: '#255f47',
+  pad: '#dcb862',
+  padBottom: '#a98f4e',
+  silk: '#f2ecdc',
+  drill: '#08110d',
+  mask: '#0a3123',
+  gold: '#dcb862',
   body: '#1b2320',
   bodyEdge: '#39443d'
 }
@@ -208,23 +214,37 @@ function drawBoard2D(g, view, opts) {
   drawPath(g, view.outline, true)
   g.fillStyle = C.substrate
   g.fill()
+  // soft key-light falloff across the mask so a sparse board still reads as a
+  // surface rather than a flat green fill (lighting only — no fake copper)
+  const grad = g.createRadialGradient(
+    width * 0.5,
+    height * 0.42,
+    0,
+    width * 0.5,
+    height * 0.42,
+    Math.max(width, height) * 0.75
+  )
+  grad.addColorStop(0, 'rgba(255,255,255,0.075)')
+  grad.addColorStop(1, 'rgba(0,0,0,0.22)')
+  g.fillStyle = grad
+  g.fill()
   g.lineWidth = Math.max(0.12, px * 1.2)
   g.strokeStyle = C.substrateEdge
   g.stroke()
 
   const layers = opts.layers
-  const drawCopper = (layerId, color, alpha) => {
+  const drawCopper = (layerId, traceColor, padColor, alpha) => {
     const layer = view.copper[layerId]
     if (!layer) return
     g.globalAlpha = alpha
-    g.strokeStyle = color
-    g.fillStyle = color
+    g.strokeStyle = traceColor
+    g.fillStyle = padColor
     g.lineCap = 'round'
     g.lineJoin = 'round'
     for (const d of layer.draws) {
       const hot = hotNet && d.net === hotNet
       g.globalAlpha = hot ? 1 : alpha
-      g.strokeStyle = hot ? UI.accent : color
+      g.strokeStyle = hot ? UI.accent : traceColor
       g.lineWidth = d.width
       drawPath(g, d.points, false)
       g.stroke()
@@ -232,7 +252,7 @@ function drawBoard2D(g, view, opts) {
     for (const f of layer.flashes) {
       const hot = hotNet && f.net === hotNet
       g.globalAlpha = hot ? 1 : alpha
-      g.fillStyle = hot ? UI.accent : color
+      g.fillStyle = hot ? UI.accent : padColor
       padPath(g, f)
       g.fill()
     }
@@ -248,8 +268,8 @@ function drawBoard2D(g, view, opts) {
     g.globalAlpha = 1
   }
 
-  if (layers.bottom) drawCopper('B.Cu', C.copperBottom, 0.55)
-  if (layers.top) drawCopper('F.Cu', C.copperTop, 1)
+  if (layers.bottom) drawCopper('B.Cu', C.traceBottom, C.padBottom, 0.75)
+  if (layers.top) drawCopper('F.Cu', C.trace, C.pad, 1)
 
   if (layers.silk) {
     for (const key of ['F.SilkS', 'B.SilkS']) {
@@ -370,7 +390,7 @@ function facetsFor(view, opts) {
     const layer = view.copper[layerId]
     if (!layer) continue
     const z = layerId === 'F.Cu' ? th + 0.02 : -0.02
-    const color = layerId === 'F.Cu' ? C.gold : '#b8a06a'
+    const color = layerId === 'F.Cu' ? C.pad : C.padBottom
     for (const f of layer.flashes) {
       const segs = f.shape === 'round' ? 12 : 4
       const pts = []
@@ -454,8 +474,25 @@ function drawBoard3D(g, view, opts) {
     return [w / 2 + r[0] * s, h / 2 - r[1] * s, z]
   }
 
-  const light = [0.35, 0.55, 0.75]
+  const light = [0.32, 0.42, 0.85]
   const faces = facetsFor(view, opts)
+
+  // Contact shadow: the board reads as a physical object on a surface rather
+  // than a floating diagram. Drawn first so every face paints over it.
+  const shadowPts = (view.outline || []).map((p) => project([p[0], p[1], 0]))
+  if (shadowPts.length > 2 && !shadowPts.some((p) => p === null)) {
+    g.save()
+    g.beginPath()
+    g.moveTo(shadowPts[0][0] + 10, shadowPts[0][1] + 16)
+    for (let i = 1; i < shadowPts.length; i += 1) g.lineTo(shadowPts[i][0] + 10, shadowPts[i][1] + 16)
+    g.closePath()
+    g.filter = 'blur(14px)'
+    g.fillStyle = 'rgba(0,0,0,0.45)'
+    g.fill()
+    g.filter = 'none'
+    g.restore()
+  }
+
   const prepared = []
   for (const f of faces) {
     const pts = f.pts.map(project)
@@ -470,7 +507,9 @@ function drawBoard3D(g, view, opts) {
     const n = f.n || [0, 0, 1]
     const rn = rotate(n)
     const lambert = Math.max(0, rn[0] * light[0] + rn[1] * light[1] + rn[2] * light[2])
-    const shade = 0.5 + 0.5 * lambert
+    // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
+    // into near-black, which read as "empty" next to reference renders.
+    const shade = 0.62 + 0.38 * lambert
     g.beginPath()
     g.moveTo(pts[0][0], pts[0][1])
     for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0], pts[i][1])
@@ -504,7 +543,10 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
     ox: 0,
     oy: 0,
     yaw: -0.55,
-    pitch: 0.95,
+    // Negative pitch looks DOWN on the board: the top face (soldermask, parts)
+    // lands above the bottom face on screen, so the lamp in drawBoard3D lights
+    // it instead of the underside. Positive pitch rendered the board from below.
+    pitch: -0.95,
     dist: 120,
     drag: null,
     spin: true
@@ -603,8 +645,9 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
   }
 
   const onPointerDown = (e) => {
-    state.current.drag = { x: e.clientX, y: e.clientY, ox: state.current.ox, oy: state.current.oy }
-    state.current.spin = false
+    const s = state.current
+    s.drag = { x: e.clientX, y: e.clientY, ox: s.ox, oy: s.oy, yaw: s.yaw, pitch: s.pitch }
+    s.spin = false
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
@@ -623,8 +666,14 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       s.ox = s.drag.ox + dx
       s.oy = s.drag.oy + dy
     } else {
-      s.yaw += dx * 0.01
-      s.pitch = Math.max(-1.35, Math.min(1.35, s.pitch + dy * 0.008))
+      // Both angles are anchored at the drag ORIGIN. Accumulating the running
+      // delta into s.yaw/s.pitch on every pointermove multiplied the rotation by
+      // the number of move events, so the same 100 px drag spun the board 5x or
+      // 40x depending on the pointer's event rate.
+      s.yaw = s.drag.yaw + dx * 0.01
+      // Drag down to tip the board's top face towards the viewer (sp < 0 puts
+      // the top face above the bottom one on screen).
+      s.pitch = Math.max(-1.35, Math.min(1.35, s.drag.pitch - dy * 0.008))
     }
     draw()
   }
@@ -688,7 +737,7 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       onPointerDown,
       onPointerMove,
       onPointerUp,
-      onPointerLeave: onPointerUp,
+      onPointerCancel: onPointerUp,
       onClick,
       role: 'img',
       'aria-label': view ? `${view.title} board preview` : 'board preview'
@@ -711,8 +760,8 @@ function DrcBadge({ drc }) {
 }
 
 const LAYER_KEYS = [
-  ['top', 'Top copper', C.copperTop],
-  ['bottom', 'Bottom copper', C.copperBottom],
+  ['top', 'Top copper', C.trace],
+  ['bottom', 'Bottom copper', C.traceBottom],
   ['silk', 'Silkscreen', C.silk],
   ['drills', 'Drills', '#000'],
   ['parts', 'Parts', '#888']
