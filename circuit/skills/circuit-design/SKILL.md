@@ -44,12 +44,12 @@ pick-and-place.
 
 ## Opening an existing KiCad board (read-only)
 
-`circuit_import` takes an absolute path to a `.kicad_pcb` (KiCad 6/7/8 and
-newer) and stores it as a project: Edge.Cuts outline, footprints, pads, tracks,
-vias and nets go straight into the viewer. Nothing is placed, routed or DRC'd,
-and every editing tool refuses the project. Re-importing the same file replaces
-that project; a different file with the same name gets a `-2` slug. Follow it
-with `circuit_view` to render it.
+`circuit_import` takes an absolute `path` **or** an `url` to a `.kicad_pcb`
+(KiCad 6/7/8 and newer) and stores it as a project: Edge.Cuts outline,
+footprints, pads, tracks, vias and nets go straight into the viewer. Nothing is
+placed, routed or DRC'd, and every editing tool refuses the project. Re-importing
+the same file or url replaces that project; a different file with the same name
+gets a `-2` slug. Follow it with `circuit_view` to render it.
 
 `circuit_samples` is the no-path version: `action="list"` shows real open-source
 KiCad boards (63-309 footprints) and `action="load"` with an `id` downloads one
@@ -58,6 +58,44 @@ user wants to see what the viewer does with a dense board, or wants a reference
 design to compare against — the bundled templates are only 8-13 parts. Loads need
 network; multi-layer samples are flattened to 2 copper layers and say so in
 `warnings`.
+
+### "find me an open-source board for X"
+
+Work down this ladder and stop at the first rung that answers:
+
+1. **`circuit_samples action="list"`** — seven curated boards, no searching. Good
+   enough when the user just wants to see a real board or a reference for a
+   class of design (USB stick, FPGA demo, PoE module, Feather, PIC programmer).
+2. **Find a repo, then search its tree.** `gh` is authenticated and does not hit
+   the anonymous rate limit (`gh search code --filename` returns nothing useful,
+   so search repos and inspect the tree):
+   ```bash
+   gh search repos --limit 8 "<topic> kicad"
+   gh api "repos/<owner>/<repo>/git/trees/HEAD?recursive=1" \
+     --jq '.tree[].path | select(endswith(".kicad_pcb"))'
+   ```
+   Without `gh`, a blob-less clone lists the same paths and costs no API quota:
+   ```bash
+   git clone -q --depth 1 --filter=blob:none --no-checkout <repo-url> /tmp/tp \
+     && git -C /tmp/tp ls-tree -r --name-only HEAD | grep '\.kicad_pcb$'
+   ```
+   Then import the raw file straight from its URL — no download step:
+   `circuit_import url=https://raw.githubusercontent.com/<owner>/<repo>/HEAD/<path>`.
+   Same pattern for GitLab (`/-/raw/master/...`). KiCad's own demos live under
+   `gitlab.com/kicad/code/kicad/-/raw/master/demos/<name>/<file>.kicad_pcb`.
+3. **A local file** the user already has: `circuit_import path=/abs/board.kicad_pcb`.
+
+Check suitability from the tool result, and say which rung you used:
+
+- `warnings` naming flattened layers — fine to view, but it is not the real
+  stackup; say so instead of implying the render is exact.
+- `no Edge.Cuts outline` — the size came from copper extents. It renders, but
+  the outline is invented; tell the user.
+- Any footprint/pad count works; 300 parts render in under 30 ms.
+
+Not importable — say so plainly, never fake a render: Eagle `.brd`, Altium,
+`.kicad_sch` (schematic), and Gerber/Excellon-only repos (a fab package, not a
+board). Offer to build the equivalent with `circuit_create` instead.
 
 ## Design rules the engine enforces
 
