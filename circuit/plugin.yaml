@@ -1,0 +1,53 @@
+name: circuit
+version: "1.0.0"
+manifest_version: 2
+api_version: 1
+description: "End-to-end PCB design: describe hardware in chat, the agent builds a 2-layer board (parts, nets, auto-placement, autorouting, DRC) and exports production files — RS-274X Gerbers, Excellon drills, a KiCad 8 project and a STEP AP214 model — then renders the board inline in the Hermes desktop UI (2D layer stackup + 3D)."
+author: Omer Demirtas
+license: MIT
+homepage: https://github.com/odtboun/hermes-circuit
+tags: [pcb, hardware, electronics, gerber, kicad, step, eda, design]
+requires_hermes: ">=0.21.5"
+provides_tools:
+  - circuit_catalog
+  - circuit_create
+  - circuit_boards
+  - circuit_board
+  - circuit_add_part
+  - circuit_connect
+  - circuit_remove_part
+  - circuit_place
+  - circuit_route
+  - circuit_check
+  - circuit_export
+  - circuit_view
+config_schema:
+  trace_width:
+    type: float
+    default: 0.2
+    label: Default trace width (mm)
+    description: Signal-net trace width used for new boards.
+  clearance:
+    type: float
+    default: 0.15
+    label: Copper clearance (mm)
+    description: Minimum copper-to-copper clearance the router and DRC enforce.
+  grid:
+    type: float
+    default: 0.1
+    label: Routing grid (mm)
+    description: Autorouter grid. 0.1 mm handles 2.54 mm headers; 0.15 is faster on sparse boards.
+  effort:
+    type: str
+    choices: [fast, normal]
+    default: normal
+    label: Routing effort
+    description: "fast probes fewer pads per net; normal searches all of them."
+  default_board_width:
+    type: float
+    default: 50.0
+    label: New board width (mm)
+  default_board_height:
+    type: float
+    default: 40.0
+    label: New board height (mm)

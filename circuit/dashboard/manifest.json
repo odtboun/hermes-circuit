@@ -1,0 +1,5 @@
+{
+  "name": "circuit",
+  "label": "Circuit — PCB designer",
+  "api": "plugin_api.py"
+}

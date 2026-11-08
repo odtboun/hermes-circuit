@@ -1,0 +1,19 @@
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# node (test harness stubs live there)
+node_modules/
+tests/js/node_modules/
+
+# local data / exports
+*.gbr
+*.drl
+*.step
+exports/
+plugin-data/
+.DS_Store
