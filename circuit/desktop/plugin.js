@@ -255,6 +255,27 @@ function parsePackageUncached(comp) {
   if (prof.family === 'inductor' && /xal\d{4}/i.test(key)) prof.z = 3.0
   if (prof.family === 'inductor' && /srn\d{4}|srp\d{4}/i.test(key)) prof.z = 3.0
   if (prof.family === 'sot23' && /sot-?416|sc-?70|sot-?323/i.test(key)) prof.z = 0.9
+  if (prof.family === 'header') {
+    // A pin SOCKET has no pins standing up — the tall plastic body is the part,
+    // with a hole per pin. A male pin HEADER is a 2.5 mm plastic block with 8.5 mm
+    // pins through it. An SMD header is just the block: its pins are flat pads.
+    // Treating all three as "male header" put 8.5 mm grey posts on every socket,
+    // which is what the "grey sticks" were on tiny-tapeout's PMOD connectors.
+    const socket = /socket|receptacle|female/i.test(key)
+    const smd = pins.length > 0 && pins.every((pin) => (pin.kind || 'tht') !== 'tht')
+    if (socket) {
+      prof.z = 8.5
+      prof.lead = 'holes'
+      prof.holeR = Math.min(0.6, Math.max(0.35, (prof.pitch || 2.54) * 0.2))
+    } else if (smd) {
+      prof.z = 2.5
+      prof.lead = 'none'
+    } else {
+      prof.z = 2.5
+      prof.lead = 'post'
+      prof.postZ = 8.5
+    }
+  }
   return prof
 }
 
@@ -406,14 +427,18 @@ function packageLeads(comp, prof) {
         color: 'metal'
       })
     } else if (style === 'tht') {
-      const r = Math.max(0.2, Math.min(0.5, (pin.drill || 0.8) / 2))
+      // A through-hole pin goes *under* the board: from above you see the solder
+      // fillet and nothing else. Drawing it as a post up to 90% of the body
+      // height put a grey cylinder standing next to every relay and can — one of
+      // the "grey sticks" on THT-heavy boards.
+      const r = Math.max(0.25, Math.min(0.6, ((pin.drill || 0.8) / 2) * 1.6))
       const n = 8
       const quad = []
       for (let i = 0; i < n; i += 1) {
         const a = (i / n) * Math.PI * 2 + Math.PI / n
         quad.push([pin.x + Math.cos(a) * r, pin.y + Math.sin(a) * r])
       }
-      out.push({ quad, z0, z1: z0 + Math.max(0.6, prof.z * 0.9), color: 'metal' })
+      out.push({ quad, z0, z1: z0 + 0.35, color: 'metal' })
     } else if (style === 'post') {
       const half = 0.32
       out.push({
@@ -847,7 +872,11 @@ function facetsFor(view, opts) {
   }
 
   // substrate: both faces are soldermask green, the exposed edge is plated
-  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrate, [0, 0, -1], 0, 'bottom', 0)
+  // Silk is painted into the substrate face as a texture when the host can
+  // rasterise one (see silkTexture); the quad path below is the fallback.
+  const texTop = showSilk && canTexture()
+  const texBottom = showSilk && canTexture()
+  pushPoly(outline.map((p) => [p[0], p[1], 0]), C.substrate, [0, 0, -1], 0, 'bottom', 0, texBottom ? { tex: 'bottom' } : null)
   for (let i = 0; i < outline.length; i += 1) {
     const a = outline[i]
     const b = outline[(i + 1) % outline.length]
@@ -866,7 +895,7 @@ function facetsFor(view, opts) {
       0
     )
   }
-  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 'top', 0)
+  pushPoly(outline.map((p) => [p[0], p[1], th]), C.substrate, [0, 0, 1], 0, 'top', 0, texTop ? { tex: 'top' } : null)
 
   // copper traces as thin plates on each copper side
   setObject('copper')
@@ -935,7 +964,9 @@ function facetsFor(view, opts) {
   // silkscreen, as thin plates of ink on the mask. Glyph polylines are skipped:
   // at board scale they are sub-pixel, and the designators are etched on the
   // parts anyway.
-  if (showSilk) {
+  // Textured silk replaces these quads wherever the host can rasterise; the
+  // geometry path stays as the fallback (and as what the test harness exercises).
+  if (showSilk && !canTexture()) {
     setObject('silk')
     for (const [key, z, side, color] of [['F.SilkS', th + 0.03, 'top', C.silk], ['B.SilkS', -0.03, 'bottom', '#9aa39c']]) {
       const layer = view.silk[key]
@@ -1036,6 +1067,20 @@ function facetsFor(view, opts) {
           lens.push([comp.x + Math.cos(a) * r, comp.y + Math.sin(a) * r])
         }
         pushPrism(lens, z1, z1 + Math.max(0.15, prof.z * 0.4), lightenHex(color, 1.45), 3.2)
+      }
+
+      // socket holes: one dark recess per pin, which is what you actually see
+      // looking down into a PMOD or header socket
+      if (prof.lead === 'holes') {
+        const r = prof.holeR || 0.5
+        for (const pin of pins) {
+          const hole = []
+          for (let i = 0; i < 8; i += 1) {
+            const a = (i / 8) * Math.PI * 2 + Math.PI / 8
+            hole.push([pin.x + Math.cos(a) * r, pin.y + Math.sin(a) * r])
+          }
+          pushPoly(hole.map((q) => [q[0], q[1], z1 + 0.005]), SLOT_INK, [0, 0, 1], lift, 'top', 3.05)
+        }
       }
 
       // connector mouth: a dark slot in the front face
@@ -1142,6 +1187,93 @@ function metalPlan(comp) {
   return { caps }
 }
 
+/** Rasterise a silk layer into a board-space texture.
+
+ *  Silk text arrives as polyline glyphs (tiny-tapeout has 681 lines, median
+ *  length 0.44 mm). Drawn as one quad per segment they read as scattered white
+ *  sticks — no joins, no caps, and the whole glyph is smaller than a pixel at
+ *  most zooms. A real board prints them as continuous ink, so the layer is
+ *  rasterised once at board resolution and sampled per pixel in the depth pass:
+ *  legible text, round caps, and a few thousand quads gone.
+ */
+const SILK_TEX = typeof WeakMap === 'function' ? new WeakMap() : null
+
+function silkTexture(view, key, color, wantPxPerMm) {
+  if (typeof document === 'undefined' || !document.createElement) return null
+  let cache = SILK_TEX ? SILK_TEX.get(view) : null
+  if (!cache) {
+    cache = {}
+    if (SILK_TEX) SILK_TEX.set(view, cache)
+  }
+  // Rasterise at roughly the resolution it will be displayed at. A fixed 24
+  // px/mm texture sampled at 5 px/mm aliases a 0.12 mm stroke into dashes —
+  // which is the "white sticks" again, just at a different stage.
+  // Coarse buckets (×1.5 steps): a wheel zoom would otherwise rebuild the
+  // texture on every frame. 3 → 40 px/mm is eight buckets in total.
+  const want = Math.max(2, Math.min(40, wantPxPerMm || 20))
+  const bucket = Math.max(3, Math.min(40, Math.round(Math.pow(1.5, Math.round(Math.log(want) / Math.log(1.5))))))
+  const cacheKey = `${key}@${bucket}`
+  if (cache[cacheKey] !== undefined) return cache[cacheKey]
+  if (Object.keys(cache).length > 6) for (const k of Object.keys(cache)) delete cache[k]
+  const lines = ((view.silk || {})[key] || {}).lines || []
+  if (!lines.length) {
+    cache[cacheKey] = null
+    return null
+  }
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const ln of lines) {
+    for (const [x, y] of ln.points || []) {
+      if (x < x0) x0 = x
+      if (y < y0) y0 = y
+      if (x > x1) x1 = x
+      if (y > y1) y1 = y
+    }
+  }
+  const margin = 0.5
+  x0 -= margin
+  y0 -= margin
+  x1 += margin
+  y1 += margin
+  const bw = Math.max(0.1, x1 - x0)
+  const bh = Math.max(0.1, y1 - y0)
+  // 2048 on the long edge keeps text sharp on a 100 mm board (20 px/mm) and
+  // still renders a 300 mm board at ~7 px/mm.
+  const pxPerMm = Math.min(bucket, 2048 / Math.max(bw, bh))
+  const tw = Math.max(1, Math.round(bw * pxPerMm))
+  const th = Math.max(1, Math.round(bh * pxPerMm))
+  const c = document.createElement('canvas')
+  c.width = tw
+  c.height = th
+  const cx = c.getContext('2d')
+  cx.setTransform(pxPerMm, 0, 0, -pxPerMm, -x0 * pxPerMm, y1 * pxPerMm)
+  cx.strokeStyle = color
+  cx.lineCap = 'round'
+  cx.lineJoin = 'round'
+  for (const ln of lines) {
+    const pts = ln.points || []
+    if (pts.length < 2) continue
+    // Keep a hairline at least ~1.2 displayed pixels wide. A 0.12 mm stroke at
+    // 5 px/mm is 0.6 px: it renders as a dotted ghost rather than printed ink.
+    cx.lineWidth = Math.max(ln.width || 0.15, 0.12, 1.2 / pxPerMm)
+    cx.beginPath()
+    cx.moveTo(pts[0][0], pts[0][1])
+    for (let i = 1; i < pts.length; i += 1) cx.lineTo(pts[i][0], pts[i][1])
+    cx.stroke()
+  }
+  const img = cx.getImageData(0, 0, tw, th)
+  const tex = { data: new Uint32Array(img.data.buffer), w: tw, h: th, x0, y1, pxPerMm }
+  cache[cacheKey] = tex
+  return tex
+}
+
+/** Can this host rasterise a texture at all? Node (the test harness) cannot. */
+function canTexture() {
+  return typeof document !== 'undefined' && !!document.createElement
+}
+
 function drawBoard3D(g, view, opts) {
   const canvas = opts.canvas
   const dpr = opts.dpr
@@ -1206,6 +1338,9 @@ function drawBoard3D(g, view, opts) {
   // the result is composited over the shadow in one drawImage. Correct by
   // construction — no ranks, no ordering heuristics, nothing can pop in or out.
   const ss = Math.min(2, Math.max(1, Math.round(dpr || 1)))
+  // device pixels per board millimetre at the board centre, used to rasterise
+  // the silk layer at display resolution
+  const silkScale = Math.max(2, Math.min(40, (fov / dist) * ss * 1.4))
   const rw = Math.max(1, Math.round(w * ss))
   const rh = Math.max(1, Math.round(h * ss))
   const th = view.board.thickness || 1.6
@@ -1226,7 +1361,14 @@ function drawBoard3D(g, view, opts) {
     // Lift the ambient term: at 0.5 the green mask and dark part bodies collapsed
     // into near-black, which read as "empty" next to reference renders.
     const shade = f.shadow ? 0.45 : 0.68 + 0.32 * lambert
+    let tex = null
+    if (f.tex) {
+      tex = f.tex === 'top'
+        ? silkTexture(view, 'F.SilkS', C.silk, silkScale)
+        : silkTexture(view, 'B.SilkS', '#9aa39c', silkScale)
+    }
     const pts = []
+    const uvz = tex ? [] : null
     let zsum = 0
     let culled = false
     for (const p of f.pts) {
@@ -1235,10 +1377,15 @@ function drawBoard3D(g, view, opts) {
       const dx = f.shadow ? 2.5 : 0
       const dy = f.shadow ? 4 : 0
       pts.push([(q[0] + dx) * ss, (q[1] + dy) * ss, 1 / q[2]])
+      if (uvz) {
+        // u/z and v/z interpolate linearly in screen space, so the texel lookup
+        // is perspective-correct after dividing by the interpolated 1/z.
+        uvz.push([((p[0] - tex.x0) * tex.pxPerMm) / q[2], ((tex.y1 - p[1]) * tex.pxPerMm) / q[2]])
+      }
       zsum += q[2]
     }
     if (culled || pts.length < 3) continue
-    items.push({ f, pts, rgb: packShaded(f.color, shade), depth: zsum / pts.length })
+    items.push({ f, pts, uvz, tex, rgb: packShaded(f.color, shade), depth: zsum / pts.length })
   }
 
   const raster = zRaster(items, rw, rh)
@@ -1334,6 +1481,8 @@ function zRaster(items, rw, rh) {
   for (let fi = 0; fi < items.length; fi += 1) {
     const pts = items[fi].pts
     const col = items[fi].rgb
+    const tex = items[fi].tex
+    const uvz = items[fi].uvz
     const n = pts.length
     let minX = Infinity
     let maxX = -Infinity
@@ -1357,6 +1506,10 @@ function zRaster(items, rw, rh) {
       let xr = -Infinity
       let wl = 0
       let wr = 0
+      let uzl = 0
+      let uzr = 0
+      let vzl = 0
+      let vzr = 0
       for (let i = 0; i < n; i += 1) {
         const a = pts[i]
         const b = pts[i + 1 === n ? 0 : i + 1]
@@ -1364,8 +1517,16 @@ function zRaster(items, rw, rh) {
           const t = (sy - a[1]) / (b[1] - a[1])
           const x = a[0] + (b[0] - a[0]) * t
           const wi = a[2] + (b[2] - a[2]) * t
-          if (x < xl) { xl = x; wl = wi }
-          if (x > xr) { xr = x; wr = wi }
+          if (x < xl) {
+            xl = x
+            wl = wi
+            if (tex) { uzl = uvz[i][0] + (uvz[i + 1 === n ? 0 : i + 1][0] - uvz[i][0]) * t; vzl = uvz[i][1] + (uvz[i + 1 === n ? 0 : i + 1][1] - uvz[i][1]) * t }
+          }
+          if (x > xr) {
+            xr = x
+            wr = wi
+            if (tex) { uzr = uvz[i][0] + (uvz[i + 1 === n ? 0 : i + 1][0] - uvz[i][0]) * t; vzr = uvz[i][1] + (uvz[i + 1 === n ? 0 : i + 1][1] - uvz[i][1]) * t }
+          }
         }
       }
       if (!(xl <= xr)) continue
@@ -1374,14 +1535,48 @@ function zRaster(items, rw, rh) {
       if (sx1 < sx0) continue
       const span = xr - xl
       const dw = span > 1e-9 ? (wr - wl) / span : 0
-      let wi = wl + dw * (sx0 + 0.5 - xl)
+      const off = sx0 + 0.5 - xl
+      let wi = wl + dw * off
       let idx = y * rw + sx0
-      for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw) {
-        if (wi > zb[idx]) {
-          zb[idx] = wi
-          px[idx] = col
-          owner[idx] = fi
-          painted += 1
+      if (tex) {
+        // Silk ink is sampled from the board-space texture and blended over the
+        // substrate colour: one quad for the whole layer instead of one per
+        // glyph stroke.
+        const duz = span > 1e-9 ? (uzr - uzl) / span : 0
+        const dvz = span > 1e-9 ? (vzr - vzl) / span : 0
+        let uz = uzl + duz * off
+        let vz = vzl + dvz * off
+        for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw, uz += duz, vz += dvz) {
+          if (wi > zb[idx]) {
+            zb[idx] = wi
+            const inv = 1 / wi
+            const tx = Math.round(uz * inv)
+            const ty = Math.round(vz * inv)
+            let out = col
+            if (tx >= 0 && ty >= 0 && tx < tex.w && ty < tex.h) {
+              const t = tex.data[ty * tex.w + tx]
+              const a = t >>> 24
+              if (a > 0) {
+                const ia = 255 - a
+                const r = (((t & 255) * a + (col & 255) * ia) / 255) | 0
+                const g2 = ((((t >> 8) & 255) * a + ((col >> 8) & 255) * ia) / 255) | 0
+                const b2 = ((((t >> 16) & 255) * a + ((col >> 16) & 255) * ia) / 255) | 0
+                out = ((255 << 24) | (b2 << 16) | (g2 << 8) | r) >>> 0
+              }
+            }
+            px[idx] = out
+            owner[idx] = fi
+            painted += 1
+          }
+        }
+      } else {
+        for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw) {
+          if (wi > zb[idx]) {
+            zb[idx] = wi
+            px[idx] = col
+            owner[idx] = fi
+            painted += 1
+          }
         }
       }
     }
@@ -2160,6 +2355,6 @@ export default {
 // Exported for the Node test harness only; the loader uses `default`.
 export const __test__ = {
   facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, zRaster, packShaded,
-  parsePackage, packageSilhouette, packageLeads, metalPlan, chipHeight, parsePitch,
+  parsePackage, packageSilhouette, packageLeads, metalPlan, chipHeight, parsePitch, silkTexture, canTexture,
   InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS
 }

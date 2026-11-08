@@ -252,8 +252,37 @@ gull.forEach((l, i) => {
   assert.ok(Math.abs(Math.min(...ys) - bands[i][0]) < 0.02, `lead ${i} must reach its pad end (min y ${Math.min(...ys)}, want ${bands[i][0]})`)
   assert.ok(Math.abs(Math.max(...ys) - bands[i][1]) < 0.02, `lead ${i} must reach the body edge (max y ${Math.max(...ys)}, want ${bands[i][1]})`)
 })
-const posts = __test__.packageLeads(mkComp('Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', smdPins), pkg('Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical', smdPins))
-assert.ok(posts.length === 2 && posts.every((p) => Math.abs(p.z1 - 8.5) < 1e-6), 'header posts stand 8.5 mm out of the plastic')
+// Male pin header: 2.5 mm plastic block with 8.5 mm pins through it.
+const thtPins = smdPins.map((p) => ({ ...p, kind: 'tht', drill: 1.0 }))
+const hdrFp = 'Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical'
+const hdrProf = pkg(hdrFp, thtPins)
+assert.equal(hdrProf.z, 2.5, 'male header plastic is 2.5 mm')
+const posts = __test__.packageLeads(mkComp(hdrFp, thtPins), hdrProf)
+assert.ok(posts.length === 2 && posts.every((p) => Math.abs(p.z1 - 8.5) < 1e-6), 'header pins stand 8.5 mm out of the plastic')
+
+// A pin SOCKET is the opposite: the tall plastic body is the part and the pins
+// are holes. Rendering it as a male header put 8.5 mm grey posts on every PMOD
+// connector (tiny-tapeout has six of them, 72 pins).
+const sockFp = 'Connector_PinSocket_2.54mm:PinSocket_2x06_P2.54mm_PMODHost1A'
+const sockProf = pkg(sockFp, thtPins)
+assert.equal(sockProf.z, 8.5, 'a 2.54 mm socket body is 8.5 mm tall')
+assert.equal(sockProf.lead, 'holes', 'a socket has holes, not posts')
+assert.equal(__test__.packageLeads(mkComp(sockFp, thtPins), sockProf).length, 0, 'a socket emits no metal pins')
+
+// An SMD header is just the plastic block; its pins are flat pads.
+const smdHdrFp = 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical_SMD_Pin1Right'
+const smdHdrProf = pkg(smdHdrFp, smdPins)
+assert.equal(smdHdrProf.z, 2.5)
+assert.equal(smdHdrProf.lead, 'none', 'an SMD header has no standing pins')
+assert.equal(__test__.packageLeads(mkComp(smdHdrFp, smdPins), smdHdrProf).length, 0)
+
+// Through-hole pins are solder fillets under the body, never posts: a 15 mm
+// relay had a grey cylinder standing beside it up to 13.5 mm.
+const relayFp = 'Relay_THT:Relay_SPDT_SANYOU_SRD_Series_Form_C'
+const relayProf = pkg(relayFp, thtPins)
+for (const l of __test__.packageLeads(mkComp(relayFp, thtPins), relayProf)) {
+  assert.ok(l.z1 - l.z0 <= 0.4, `a THT pin must stay at the board (${l.z1 - l.z0} mm)`)
+}
 assert.equal(__test__.packageLeads(mkComp('MountingHole:MountingHole_3.2mm_M3_Pad', smdPins), pkg('MountingHole:MountingHole_3.2mm_M3_Pad', smdPins)).length, 0, 'a mounting hole has no body and no leads')
 
 // ---- the 3D view resolves depth per pixel, not by sorting ---------------- //
