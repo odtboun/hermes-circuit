@@ -399,25 +399,33 @@ function drawBoard2D(g, view, opts) {
   }
 
   if (layers.parts) {
-    g.globalAlpha = 0.9
+    const polyFill = (poly, color) => {
+      g.beginPath()
+      g.moveTo(poly[0][0], poly[0][1])
+      for (let i = 1; i < poly.length; i += 1) g.lineTo(poly[i][0], poly[i][1])
+      g.closePath()
+      g.fillStyle = color
+      g.fill()
+    }
     for (const c of view.components) {
       const b = c.body || { w: 0, h: 0 }
       if (!b.w || !b.h) continue
       const prof = bodyProfile(c)
       const poly = bodyPolygon(c, prof)
-      g.beginPath()
-      g.moveTo(poly[0][0], poly[0][1])
-      for (let i = 1; i < poly.length; i += 1) g.lineTo(poly[i][0], poly[i][1])
-      g.closePath()
-      g.fillStyle = 'rgba(18,22,20,0.55)'
-      g.fill()
-      g.strokeStyle = 'rgba(255,255,255,0.32)'
-      g.lineWidth = Math.max(0.08, px * 0.8)
+      const color = bodyColor(c, prof)
+      // Opaque: a translucent body let the copper and silk show through it, which
+      // reads as a mistake, not as depth.
+      polyFill(poly, color)
+      g.strokeStyle = 'rgba(0,0,0,0.38)'
+      g.lineWidth = Math.max(0.06, px * 0.7)
       g.stroke()
+      const plan = metalPlan(c)
+      for (const cap of plan.caps) polyFill(cap.quad, METAL)
+      for (const lead of plan.leads) polyFill(lead, METAL)
       if (t.k > 9) {
         g.save()
         g.translate(c.x, c.y - (b.h / 2 + 1.4))
-        g.fillStyle = 'rgba(255,255,255,0.55)'
+        g.fillStyle = inkFor(color)
         g.font = '10px ui-sans-serif, system-ui, sans-serif'
         g.textAlign = 'center'
         g.scale(1 / t.k, -1 / t.k)
@@ -457,6 +465,14 @@ function facetsFor(view, opts) {
   const th = view.board.thickness || 1.6
   const outline = view.outline || []
   const lift = opts.explode ? 6 : 0
+  // The same layer chips drive 2D and 3D, so a toggle means the same thing in
+  // both views. Anything not explicitly off is on.
+  const L = opts.layers || {}
+  const showTop = L.top !== false
+  const showBottom = L.bottom !== false
+  const showSilk = L.silk !== false
+  const showDrills = L.drills !== false
+  const showParts = L.parts !== false
 
   // Faces carry (side, rank), not a fixed paint index. A 2-layer board is a
   // stack of near-coplanar sheets (bottom sheet, edges, top sheet, traces, pads,
@@ -504,6 +520,7 @@ function facetsFor(view, opts) {
     const layer = view.copper[layerId]
     if (!layer) continue
     const top = layerId === 'F.Cu'
+    if (top ? !showTop : !showBottom) continue
     const z = top ? th + 0.01 : -0.01
     const color = top ? C.trace : C.traceBottom
     for (const d of layer.draws) {
@@ -536,6 +553,7 @@ function facetsFor(view, opts) {
   for (const layerId of ['F.Cu', 'B.Cu']) {
     const layer = view.copper[layerId]
     if (!layer) continue
+    if (layerId === 'F.Cu' ? !showTop : !showBottom) continue
     const z = layerId === 'F.Cu' ? th + 0.02 : -0.02
     const color = layerId === 'F.Cu' ? C.pad : C.padBottom
     for (const f of layer.flashes) {
@@ -559,12 +577,61 @@ function facetsFor(view, opts) {
     }
   }
 
+  // silkscreen, as thin plates of ink on the mask. Glyph polylines are skipped:
+  // at board scale they are sub-pixel, and the designators are etched on the
+  // parts anyway.
+  if (showSilk) {
+    for (const [key, z, side, color] of [['F.SilkS', th + 0.03, 'top', C.silk], ['B.SilkS', -0.03, 'bottom', '#9aa39c']]) {
+      const layer = view.silk[key]
+      if (!layer) continue
+      for (const ln of layer.lines || []) {
+        const pts = ln.points || []
+        const hw = Math.max(ln.width || 0.15, 0.1) / 2
+        for (let i = 0; i < pts.length - 1; i += 1) {
+          const [x1, y1] = pts[i]
+          const [x2, y2] = pts[i + 1]
+          const len = Math.hypot(x2 - x1, y2 - y1)
+          if (len < 0.08) continue
+          const nx = (-(y2 - y1) / len) * hw
+          const ny = ((x2 - x1) / len) * hw
+          pushPoly(
+            [
+              [x1 + nx, y1 + ny, z],
+              [x2 + nx, y2 + ny, z],
+              [x2 - nx, y2 - ny, z],
+              [x1 - nx, y1 - ny, z]
+            ],
+            color,
+            [0, 0, side === 'top' ? 1 : -1],
+            0,
+            side,
+            1.5
+          )
+        }
+      }
+    }
+  }
+
+  // drilled holes: a dark disc in each pad, so through-hole pads read as pads
+  // with a hole instead of solid gold blobs
+  if (showDrills) {
+    for (const d of view.drills || []) {
+      const r = Math.max((d.d || 0.8) / 2, 0.15)
+      const pts = []
+      for (let i = 0; i < 12; i += 1) {
+        const a = (i / 12) * Math.PI * 2
+        pts.push([d.x + Math.cos(a) * r, d.y + Math.sin(a) * r, th + 0.03])
+      }
+      pushPoly(pts, C.drill, [0, 0, 1], 0, 'top', 2.6)
+    }
+  }
+
   // Component bodies, as prisms: rectangle / chamfered / cylindrical by family.
   // Each part also gets a contact shadow, its designator etched on the top face,
   // a pin-1 dot, and metal on it: terminations for two-terminal parts, visible
   // leads for everything else. Without the metal a part reads as a bare box,
   // because its pads sit underneath it.
-  for (const comp of view.components) {
+  for (const comp of showParts ? view.components : []) {
     const b = comp.body || {}
     if (!b.w || !b.h) continue
     const prof = bodyProfile(comp)
@@ -601,73 +668,25 @@ function facetsFor(view, opts) {
     }
 
     // ---- metal -----------------------------------------------------------
-    const rot = ((comp.rot || 0) * Math.PI) / 180
-    const ax = [Math.cos(rot), Math.sin(rot)]          // along the body's length
-    const px = [-Math.sin(rot), Math.cos(rot)]         // across it
-    const hx = (Math.abs(ax[0]) * b.w + Math.abs(ax[1]) * b.h) / 2
-    const hp = (Math.abs(px[0]) * b.w + Math.abs(px[1]) * b.h) / 2
-    const at = (a, p2, z) => [comp.x + ax[0] * a + px[0] * p2, comp.y + ax[1] * a + px[1] * p2, z]
-
-    if (pins.length === 2) {
-      // two-terminal part: a metal cap wrapping each end (what you actually see
-      // on a resistor or capacitor), 22% of the body length per end.
-      const capLen = Math.min(Math.max(hx * 0.44, 0.22), 1.0)
-      for (const side of [-1, 1]) {
-        const a0 = side * (hx - capLen)
-        const a1 = side * hx
-        pushPoly(
-          [at(a0, -hp, z1 + 0.004), at(a1, -hp, z1 + 0.004), at(a1, hp, z1 + 0.004), at(a0, hp, z1 + 0.004)],
-          METAL,
-          [0, 0, 1],
-          lift,
-          'top',
-          3.5
-        )
-        pushPoly(
-          [at(a1, -hp, z0 + 0.02), at(a1, hp, z0 + 0.02), at(a1, hp, z1), at(a1, -hp, z1)],
-          METAL,
-          [side * ax[0], side * ax[1], 0],
-          lift,
-          'top',
-          3.5
-        )
-      }
-    } else {
-      // multi-terminal part: draw the leads that actually poke out past the body
-      for (const pin of pins) {
-        const pw = pin.w || 0.4
-        const ph = pin.h || 0.4
-        const dx = pin.x - comp.x
-        const dy = pin.y - comp.y
-        const a = dx * ax[0] + dy * ax[1]
-        const c = dx * px[0] + dy * px[1]
-        const alongAxis = Math.abs(a) >= Math.abs(c)
-        const u = alongAxis ? ax : px
-        const v = alongAxis ? px : ax
-        const offU = alongAxis ? a : c
-        const offV = alongAxis ? c : a
-        const bodyHalf = alongAxis ? hx : hp
-        const side = offU < 0 ? -1 : 1
-        const padHalfU = (Math.abs(u[0]) * pw + Math.abs(u[1]) * ph) / 2
-        const padHalfV = (Math.abs(v[0]) * pw + Math.abs(v[1]) * ph) / 2
-        const outerU = offU + side * padHalfU
-        if (Math.abs(outerU) <= bodyHalf + 0.02) continue   // hidden under the body
-        const innerU = side * bodyHalf
-        const zLead = th + 0.045
-        const atUV = (uAmt, vAmt) => [
-          comp.x + u[0] * uAmt + v[0] * vAmt,
-          comp.y + u[1] * uAmt + v[1] * vAmt,
-          zLead
-        ]
-        pushPoly(
-          [atUV(innerU, offV - padHalfV), atUV(outerU, offV - padHalfV), atUV(outerU, offV + padHalfV), atUV(innerU, offV + padHalfV)],
-          METAL,
-          [0, 0, 1],
-          lift,
-          'top',
-          3.5
-        )
-      }
+    const plan = metalPlan(comp)
+    for (const cap of plan.caps) {
+      pushPoly(cap.quad.map((p) => [p[0], p[1], z1 + 0.004]), METAL, [0, 0, 1], lift, 'top', 3.5)
+      pushPoly(
+        [
+          [cap.outer[0][0], cap.outer[0][1], z0 + 0.02],
+          [cap.outer[1][0], cap.outer[1][1], z0 + 0.02],
+          [cap.outer[1][0], cap.outer[1][1], z1],
+          [cap.outer[0][0], cap.outer[0][1], z1]
+        ],
+        METAL,
+        cap.normal,
+        lift,
+        'top',
+        3.5
+      )
+    }
+    for (const lead of plan.leads) {
+      pushPoly(lead.map((p) => [p[0], p[1], th + 0.045]), METAL, [0, 0, 1], lift, 'top', 3.5)
     }
   }
   return faces
@@ -702,9 +721,68 @@ function drawFaceLabel(g, pts, label) {
   g.textAlign = 'center'
   g.textBaseline = 'middle'
   g.fillStyle = label.ink
-  g.globalAlpha = 0.8
   g.fillText(label.text, W / 2, H / 2)
   g.restore()
+}
+
+/** Metal geometry for a part, in board mm: end caps for two-terminal parts,
+ *  leads for the pins that poke out past the body. Shared by the 2D and 3D
+ *  renderers so both show the same terminations. */
+function metalPlan(comp) {
+  const b = comp.body || {}
+  const pins = comp.pins || []
+  const rot = ((comp.rot || 0) * Math.PI) / 180
+  const ax = [Math.cos(rot), Math.sin(rot)]      // along the body's length
+  const px = [-Math.sin(rot), Math.cos(rot)]     // across it
+  const hx = (Math.abs(ax[0]) * b.w + Math.abs(ax[1]) * b.h) / 2
+  const hp = (Math.abs(px[0]) * b.w + Math.abs(px[1]) * b.h) / 2
+  const at = (a, c) => [comp.x + ax[0] * a + px[0] * c, comp.y + ax[1] * a + px[1] * c]
+  const caps = []
+  const leads = []
+  if (pins.length === 2) {
+    const capLen = Math.min(Math.max(hx * 0.44, 0.22), 1.0)
+    for (const side of [-1, 1]) {
+      const a0 = side * (hx - capLen)
+      const a1 = side * hx
+      caps.push({
+        quad: [at(a0, -hp), at(a1, -hp), at(a1, hp), at(a0, hp)],
+        outer: [at(a1, -hp), at(a1, hp)],
+        normal: [side * ax[0], side * ax[1], 0]
+      })
+    }
+    return { caps, leads }
+  }
+  for (const pin of pins) {
+    const pw = pin.w || 0.4
+    const ph = pin.h || 0.4
+    const dx = pin.x - comp.x
+    const dy = pin.y - comp.y
+    const a = dx * ax[0] + dy * ax[1]
+    const c = dx * px[0] + dy * px[1]
+    const alongAxis = Math.abs(a) >= Math.abs(c)
+    const u = alongAxis ? ax : px
+    const v = alongAxis ? px : ax
+    const offU = alongAxis ? a : c
+    const offV = alongAxis ? c : a
+    const bodyHalf = alongAxis ? hx : hp
+    const side = offU < 0 ? -1 : 1
+    const padHalfU = (Math.abs(u[0]) * pw + Math.abs(u[1]) * ph) / 2
+    const padHalfV = (Math.abs(v[0]) * pw + Math.abs(v[1]) * ph) / 2
+    const outerU = offU + side * padHalfU
+    if (Math.abs(outerU) <= bodyHalf + 0.02) continue    // hidden under the body
+    const innerU = side * bodyHalf
+    const atUV = (uAmt, vAmt) => [
+      comp.x + u[0] * uAmt + v[0] * vAmt,
+      comp.y + u[1] * uAmt + v[1] * vAmt
+    ]
+    leads.push([
+      atUV(innerU, offV - padHalfV),
+      atUV(outerU, offV - padHalfV),
+      atUV(outerU, offV + padHalfV),
+      atUV(innerU, offV + padHalfV)
+    ])
+  }
+  return { caps, leads }
 }
 
 function drawBoard3D(g, view, opts) {
@@ -713,6 +791,7 @@ function drawBoard3D(g, view, opts) {
   g.setTransform(1, 0, 0, 1, 0, 0)
   g.clearRect(0, 0, canvas.width, canvas.height)
   g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  g.globalAlpha = 1
 
   const w = canvas.width / dpr
   const h = canvas.height / dpr
@@ -770,8 +849,8 @@ function drawBoard3D(g, view, opts) {
   // past vertical puts the camera under it, so the pass sequence is mirrored.
   const underside = Math.cos(opts.pitch || 0) < 0
   const sequence = underside
-    ? [['top', 3.5], ['top', 3], ['top', 2.5], ['top', 2], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 2]]
-    : [['bottom', 2], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 2], ['top', 2.5], ['top', 3], ['top', 3.5]]
+    ? [['top', 3.5], ['top', 3], ['top', 2.6], ['top', 2.5], ['top', 2], ['top', 1.5], ['top', 1], ['top', 0], ['edge', 0], ['bottom', 0], ['bottom', 1], ['bottom', 1.5], ['bottom', 2]]
+    : [['bottom', 2], ['bottom', 1.5], ['bottom', 1], ['bottom', 0], ['edge', 0], ['top', 0], ['top', 1], ['top', 1.5], ['top', 2], ['top', 2.5], ['top', 2.6], ['top', 3], ['top', 3.5]]
   const passes = new Map()
   for (const item of prepared) {
     const key = `${item.f.side}:${item.f.rank}`
@@ -812,10 +891,17 @@ function drawBoard3D(g, view, opts) {
     g.moveTo(pts[0][0], pts[0][1])
     for (let i = 1; i < pts.length; i += 1) g.lineTo(pts[i][0], pts[i][1])
     g.closePath()
-    g.fillStyle = shadeColor(f.color, shade, opts.alpha || 1)
+    const faceFill = shadeColor(f.color, shade, opts.alpha || 1)
+    g.fillStyle = faceFill
     g.fill()
-    // No per-face black stroke: at a few thousand faces the outline pass is what
-    // made the board look inked-in. Shading separates faces on its own.
+    // Stroke each face in its OWN colour: adjacent faces only touch at
+    // antialiased edges, so without it the background shows through as a
+    // see-through seam on every join (measured: 21k near-zero-alpha pixels, 7%
+    // of the canvas). A black stroke closed the seams too but inked the board in;
+    // same-colour does not.
+    g.strokeStyle = faceFill
+    g.lineWidth = 0.9
+    g.stroke()
 
     if (f.pin1) {
       const dot = project(f.pin1)
@@ -903,6 +989,7 @@ function BoardCanvas({ view, mode, layers, hotNet, onHover, onPick, height, auto
       drawBoard3D(g, view, {
         canvas,
         dpr,
+        layers,
         explode: layers.explode,
         alpha: 1,
         yaw: state.current.yaw,
