@@ -1345,6 +1345,12 @@ function drawBoard3D(g, view, opts) {
   const rh = Math.max(1, Math.round(h * ss))
   const th = view.board.thickness || 1.6
 
+  const NEAR = 0.35
+  const toCam = (p) => {
+    const r = rotate([p[0] - cx, p[1] - cy, p[2] - th / 2])
+    return [r[0], r[1], dist - r[2]]
+  }
+
   const items = []
   for (const f of faces) {
     const n = f.n || [0, 0, 1]
@@ -1367,25 +1373,50 @@ function drawBoard3D(g, view, opts) {
         ? silkTexture(view, 'F.SilkS', C.silk, silkScale)
         : silkTexture(view, 'B.SilkS', '#9aa39c', silkScale)
     }
+    // Near-plane clip, then project. Zooming in used to drop whole faces: the
+    // board's substrate is ONE polygon covering the whole outline, so as soon as
+    // a single corner passed behind the camera the entire green face was thrown
+    // away — the mask vanished while the (small) parts stayed. Clip the polygon
+    // against z = NEAR instead and keep the visible remainder.
+    const world = f.pts
+    const poly = []
+    for (let i = 0; i < world.length; i += 1) {
+      const a = world[i]
+      const b = world[(i + 1) % world.length]
+      const ca = toCam(a)
+      const cb = toCam(b)
+      const ain = ca[2] >= NEAR
+      const bin = cb[2] >= NEAR
+      if (ain) poly.push({ w: a, c: ca })
+      if (ain !== bin) {
+        const t = (NEAR - ca[2]) / (cb[2] - ca[2])
+        poly.push({
+          w: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t],
+          c: [ca[0] + (cb[0] - ca[0]) * t, ca[1] + (cb[1] - ca[1]) * t, NEAR]
+        })
+      }
+    }
+    if (poly.length < 3) continue
+    const clipped = poly.length !== world.length
     const pts = []
     const uvz = tex ? [] : null
     let zsum = 0
-    let culled = false
-    for (const p of f.pts) {
-      const q = project(p)
-      if (!q) { culled = true; break }
-      const dx = f.shadow ? 2.5 : 0
-      const dy = f.shadow ? 4 : 0
-      pts.push([(q[0] + dx) * ss, (q[1] + dy) * ss, 1 / q[2]])
+    const ox = f.shadow ? 2.5 : 0
+    const oy = f.shadow ? 4 : 0
+    for (const v of poly) {
+      const z = v.c[2]
+      const sc = fov / z
+      pts.push([(w / 2 + v.c[0] * sc + ox) * ss, (h / 2 - v.c[1] * sc + oy) * ss, 1 / z])
       if (uvz) {
         // u/z and v/z interpolate linearly in screen space, so the texel lookup
-        // is perspective-correct after dividing by the interpolated 1/z.
-        uvz.push([((p[0] - tex.x0) * tex.pxPerMm) / q[2], ((tex.y1 - p[1]) * tex.pxPerMm) / q[2]])
+        // is perspective-correct after dividing by the interpolated 1/z. The
+        // world point is interpolated along the clipped edge, so the mapping
+        // stays exact on the new vertices.
+        uvz.push([((v.w[0] - tex.x0) * tex.pxPerMm) / z, ((tex.y1 - v.w[1]) * tex.pxPerMm) / z])
       }
-      zsum += q[2]
+      zsum += z
     }
-    if (culled || pts.length < 3) continue
-    items.push({ f, pts, uvz, tex, rgb: packShaded(f.color, shade), depth: zsum / pts.length })
+    items.push({ f, pts, uvz, tex, clipped, rgb: packShaded(f.color, shade), depth: zsum / poly.length })
   }
 
   const raster = zRaster(items, rw, rh)
@@ -1420,7 +1451,7 @@ function drawBoard3D(g, view, opts) {
         g.fill()
       }
     }
-    if (f.label) {
+    if (f.label && !it.clipped) {
       const css = it.pts.map((p) => [p[0] / ss, p[1] / ss])
       let ax = 0
       let ay = 0

@@ -300,6 +300,21 @@ assert.equal(a1.px[mid] >>> 0, 0xff00ff00, 'the nearer quad must own the overlap
 assert.equal(a2.px[mid] >>> 0, a1.px[mid] >>> 0, 'depth order must not depend on paint order')
 assert.equal(a1.px[3 * 20 + 3] >>> 0, 0xff0000ff, 'the far quad still shows outside the overlap')
 
+// Zooming in must not delete the board. The substrate is a single polygon over
+// the whole outline, so a corner passing behind the camera used to discard the
+// entire face (the green vanished, the small parts stayed). Faces are clipped to
+// the near plane now: at a distance smaller than the board, the substrate still
+// covers the frame.
+const zoomView = {
+  board: { width: 100, height: 80, thickness: 1.6 },
+  outline: [[0, 0], [100, 0], [100, 80], [0, 80]],
+  copper: { 'F.Cu': { draws: [], flashes: [] }, 'B.Cu': { draws: [], flashes: [] } },
+  silk: {}, drills: [], components: []
+}
+const zoomCtx = recordingContext()
+__test__.drawBoard3D(zoomCtx.ctx, zoomView, { canvas, dpr: 1, explode: false, alpha: 1, yaw: -0.55, pitch: -0.95, dist: 30 })
+assert.ok(canvas.__stats.painted > 20000, `the board must still be drawn at close zoom (painted ${canvas.__stats.painted})`)
+
 // A concave outline must not be filled as its convex hull. This is a slot cut
 // into a board edge: scanlines through it cross the outline FOUR times, and a
 // min..max fill painted the slot in — the "green spills into the L corner" bug.
