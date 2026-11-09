@@ -34,7 +34,16 @@ pick-and-place.
 6. **`circuit_route`** — autoroute + DRC. Read `failed` and `drc` carefully.
 7. **`circuit_check`** — ERC (dangling nets, missing power/ground, courtyard
    overlaps) plus DRC. Fix errors before exporting.
-8. **`circuit_export`** — writes everything and returns the file list.
+8. **`circuit_export`** — writes the fabrication package and returns the file
+   list. It contains: RS-274X gerbers (copper, mask, silk, edge, paste) with X2
+   file functions, Excellon drills split PTH/NPTH, a `<slug>.gbrjob` layer map, a
+   `readme.txt` stackup, a KiCad 8 project, an AP214 STEP, `bom.csv` (with
+   MPN/Mfr columns — blank until a real part number is known), `pos.csv` plus a
+   `pos-jlcpcb.csv` assembly dialect, `netlist.json`, `board.json`, an SVG/HTML
+   preview, a hashed `manifest.json`, a `-gerbers.zip` (fab) and an
+   `-assembly.zip` (BOM + PnP + stencil). Vias are tented unless the board sets
+   `tent_vias: false`. Set `SOURCE_DATE_EPOCH` to make the output byte-identical
+   across builds. Imported boards cannot be exported (read-only).
 9. **`circuit_view`** — returns a transcript directive; put the `directive` value
    **alone on its own line** in your reply so the board renders inline:
 
