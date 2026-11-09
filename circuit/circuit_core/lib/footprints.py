@@ -360,6 +360,22 @@ _register(
 )
 
 _register(
+    "fiducial-1mm", "1 mm fiducial (mask-opened copper dot)", [
+        _pad("1", 0.0, 0.0, 1.0, 1.0, shape="round", name="FID"),
+    ],
+    {"w": 0.0, "h": 0.0, "z": 0.0, "color": "hole"},
+    {"w": 2.0, "h": 2.0}, tags=["mechanical", "fiducial"],
+)
+
+_register(
+    "testpoint-1.5mm", "1.5 mm test point pad", [
+        _pad("1", 0.0, 0.0, 1.5, 1.5, shape="round", name="TP"),
+    ],
+    {"w": 0.0, "h": 0.0, "z": 0.0, "color": "metal"},
+    {"w": 2.4, "h": 2.4}, tags=["mechanical", "testpoint"],
+)
+
+_register(
     "mounting-hole-m3", "M3 mounting hole (NPTH)", [
         _pad("1", 0.0, 0.0, 3.2, 3.2, shape="npth", drill=3.2, name="MH"),
     ],

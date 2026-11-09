@@ -150,10 +150,17 @@ def mask(board: Board, expansion: float = 0.06) -> Dict[str, dict]:
 
 
 def paste(board: Board, margin: float = 0.0) -> Dict[str, dict]:
-    """SMD stencil apertures — top side only in this engine."""
+    """SMD stencil apertures — top side only in this engine.
+
+    Fiducials are excluded: they are bare copper dots for the pick-and-place
+    camera, and a paste aperture over one would cover it in solder.
+    """
     out = {"F.Paste": {"flashes": []}}
+    fiducials = _refs_with_tag(board, "fiducial")
     for pad in board.world_pads():
         if pad["kind"] != "smd" or pad.get("layer") != "top":
+            continue
+        if pad["ref"] in fiducials:
             continue
         out["F.Paste"]["flashes"].append({
             "shape": pad["shape"], "x": pad["x"], "y": pad["y"],
@@ -344,9 +351,24 @@ def drills(board: Board) -> List[dict]:
     return out
 
 
+def _refs_with_tag(board: Board, tag: str) -> set:
+    """Refs whose library part carries a tag (fiducials are copper, not parts)."""
+    out = set()
+    for c in board.data["components"]:
+        try:
+            if tag in (parts.get(c["part"]).get("tags") or []):
+                out.add(c["ref"])
+        except KeyError:
+            continue
+    return out
+
+
 def bom(board: Board) -> List[dict]:
     groups: Dict[str, dict] = {}
+    skip = _refs_with_tag(board, "fiducial")
     for c in board.data["components"]:
+        if c["ref"] in skip:
+            continue
         part = parts.get(c["part"])
         key = (c["part"], c["value"])
         g = groups.setdefault(key, {
@@ -378,7 +400,10 @@ def placement_assembly(board: Board) -> List[dict]:
     rows = []
     h = board.board["height"]
     w = board.board["width"]
+    skip = _refs_with_tag(board, "fiducial")   # nothing to place: it is bare copper
     for c in board.data["components"]:
+        if c["ref"] in skip:
+            continue
         part = parts.get(c["part"])
         side = c.get("side", "top")
         x = c.get("x") or 0.0
@@ -400,7 +425,10 @@ def placement_assembly(board: Board) -> List[dict]:
 
 def placement(board: Board) -> List[dict]:
     rows = []
+    skip = _refs_with_tag(board, "fiducial")
     for c in board.data["components"]:
+        if c["ref"] in skip:
+            continue
         part = parts.get(c["part"])
         rows.append({
             "ref": c["ref"], "part": c["part"], "footprint": part["footprint"],

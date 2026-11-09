@@ -202,6 +202,13 @@ _part("crystal-3225", "Crystal 3.2 x 2.5 mm", "crystal-3225", "timing",
       tags=["crystal"])
 _part("mounting-hole-m3", "Mounting hole M3", "mounting-hole-m3", "mechanical",
       "3.2 mm non-plated hole", pins={"1": "MH"}, tags=["mechanical"])
+# Assembly alignment: pick-and-place machines need three of these, and a test
+# point is the same copper dot with a net on it.
+_part("fiducial-1mm", "Fiducial 1 mm", "fiducial-1mm", "mechanical",
+      "Mask-opened copper dot for pick-and-place alignment",
+      pins={"1": "FID"}, tags=["mechanical", "fiducial"])
+_part("testpoint-1.5mm", "Test point 1.5 mm", "testpoint-1.5mm", "mechanical",
+      "Round probe pad", pins={"1": "TP"}, tags=["mechanical", "testpoint"])
 
 # --------------------------------------------------------------------------- #
 # modules

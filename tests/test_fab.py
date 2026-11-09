@@ -358,3 +358,24 @@ def test_export_is_byte_identical_when_the_epoch_is_pinned(tmp_path, monkeypatch
     with zipfile.ZipFile(ex / "pico-blinky-gerbers.zip") as zf:
         years = {info.date_time[0] for info in zf.infolist()}
     assert years == {2023}, years
+
+
+def test_fiducials_are_copper_not_parts(tmp_path, monkeypatch):
+    """A fiducial gets a mask opening and nothing else: no paste, no BOM line, no
+    pick-and-place row."""
+    monkeypatch.setenv("CIRCUIT_DATA_DIR", str(tmp_path / "data"))
+    board = templates.instantiate("pico-blinky")
+    board.add_component("fiducial-1mm", ref="FID1")
+    board.add_component("testpoint-1.5mm", ref="TP1")
+    from circuit_core import placement as place_mod
+
+    place_mod.auto_place(board)
+
+    assert "FID1" in {f["ref"] for f in layers.mask(board)["F.Mask"]["flashes"]}
+    assert "FID1" not in {f["ref"] for f in layers.paste(board)["F.Paste"]["flashes"]}
+    assert "FID1" not in {r for row in layers.bom(board) for r in row["refs"]}
+    assert "FID1" not in {r["ref"] for r in layers.placement(board)}
+    assert "FID1" not in {r["ref"] for r in layers.placement_assembly(board)}
+    # a test point is a real pad: it stays in the BOM and the placement
+    assert "TP1" in {r for row in layers.bom(board) for r in row["refs"]}
+    assert "TP1" in {r["ref"] for r in layers.placement(board)}
