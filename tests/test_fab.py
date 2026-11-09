@@ -269,3 +269,59 @@ def test_bom_has_supplier_columns_and_never_invents_a_part_number(built):
     for line in (ex / "bom.csv").read_text().strip().splitlines()[1:]:
         fields = line.split(",")
         assert len(fields) == 8
+
+
+def test_silk_never_prints_on_a_mask_opening(built):
+    """Fabs clip silk over exposed copper, so the legend silently disappears."""
+    board, _summary = built
+    drawn = layers.silk(board)
+    pads = [p for p in board.world_pads() if p["kind"] != "npth"]
+    for layer, side in (("F.SilkS", "top"), ("B.SilkS", "bottom")):
+        rects = []
+        for p in pads:
+            if p["kind"] == "tht" or p.get("layer", "top") == side:
+                rects.append((p["x"] - p["w"] / 2, p["y"] - p["h"] / 2,
+                              p["x"] + p["w"] / 2, p["y"] + p["h"] / 2))
+        for line in drawn[layer]["lines"] + drawn[layer]["text"]:
+            hw = (line.get("width") or 0.12) / 2
+            pts = line["points"]
+            for i in range(len(pts) - 1):
+                for rect in rects:
+                    span = layers._seg_rect_span(
+                        pts[i], pts[i + 1],
+                        (rect[0] - hw, rect[1] - hw, rect[2] + hw, rect[3] + hw))
+                    assert span is None, f"{layer} silk prints on a pad: {pts[i]} -> {pts[i + 1]}"
+
+
+def test_drc_reports_silk_over_pad(built):
+    """The check has to fire when silk really does sit on copper."""
+    board, _summary = built
+    from circuit_core import drc as drc_mod
+
+    clean = drc_mod.check(board)
+    assert clean["counts"]["silk"] == 0
+
+    # put a silk line straight across a pad and the check must catch it
+    pad = next(p for p in board.world_pads() if p["kind"] != "npth")
+    layers.silk = _patched_silk(layers.silk, pad)
+    try:
+        dirty = drc_mod.check(board)
+    finally:
+        layers.silk = _ORIGINAL_SILK
+    assert dirty["counts"]["silk"] >= 1
+    assert any("overlaps the mask opening" in w for w in dirty["warnings"])
+    assert dirty["ok"], "silk on copper is a warning, not an error"
+
+
+_ORIGINAL_SILK = layers.silk
+
+
+def _patched_silk(original, pad):
+    def silk_with_a_bad_line(board):
+        out = original(board)
+        out["F.SilkS"]["lines"].append({
+            "points": [[pad["x"] - 1.0, pad["y"]], [pad["x"] + 1.0, pad["y"]]],
+            "width": 0.12, "kind": "body", "ref": pad["ref"],
+        })
+        return out
+    return silk_with_a_bad_line

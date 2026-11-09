@@ -166,6 +166,19 @@ def paste(board: Board, margin: float = 0.0) -> Dict[str, dict]:
 
 def silk(board: Board) -> Dict[str, dict]:
     out = {"F.SilkS": {"lines": [], "text": []}, "B.SilkS": {"lines": [], "text": []}}
+    # Mask openings per silk side: silk must not print on exposed copper, and the
+    # designator has to be placed where it actually fits.
+    side_pads: Dict[str, List[tuple]] = {"F.SilkS": [], "B.SilkS": []}
+    for pad in board.world_pads():
+        if pad["kind"] == "npth":
+            continue
+        rect = (pad["x"] - pad["w"] / 2.0, pad["y"] - pad["h"] / 2.0,
+                pad["x"] + pad["w"] / 2.0, pad["y"] + pad["h"] / 2.0)
+        if pad["kind"] == "tht" or pad.get("layer", "top") == "top":
+            side_pads["F.SilkS"].append(rect)
+        if pad["kind"] == "tht" or pad.get("layer") == "bottom":
+            side_pads["B.SilkS"].append(rect)
+
     for c in board.data["components"]:
         if c.get("x") is None:
             continue
@@ -181,23 +194,127 @@ def silk(board: Board) -> Dict[str, dict]:
             pts = [geom.place(p, c["x"], c["y"], c.get("rot", 0.0)) for p in local]
             out[layer]["lines"].append({"points": [list(p) for p in pts], "width": 0.12,
                                         "kind": "body", "ref": ref})
-        # pin-1 marker
+        # pin-1 marker: a small square inside the body at the corner nearest pin 1.
+        # It used to be drawn centred on the pad, which printed silk on exposed
+        # copper — fabs clip that away, so the marker silently vanished.
         pads = [p for p in fp["pads"] if p["kind"] != "npth"]
-        if pads:
+        if pads and body["w"] > 0 and body["h"] > 0:
             p1 = next((p for p in pads if p["num"] == "1"), pads[0])
             mx, my = geom.place((p1["x"], p1["y"]), c["x"], c["y"], c.get("rot", 0.0))
-            out[layer]["lines"].append({
-                "points": [[mx - 0.25, my - 0.25], [mx + 0.25, my - 0.25],
-                           [mx + 0.25, my + 0.25], [mx - 0.25, my + 0.25], [mx - 0.25, my - 0.25]],
-                "width": 0.1, "kind": "pin1", "ref": ref,
-            })
+            # pull the point toward the body centre until it is inside the outline
+            hw = body["w"] / 2.0 - 0.45
+            hh = body["h"] / 2.0 - 0.45
+            if hw > 0.2 and hh > 0.2:
+                dx = max(-hw, min(hw, mx - c["x"]))
+                dy = max(-hh, min(hh, my - c["y"]))
+                rot = c.get("rot", 0.0)
+                cx, cy = geom.place((dx, dy), c["x"], c["y"], rot)
+                out[layer]["lines"].append({
+                    "points": [[cx - 0.22, cy - 0.22], [cx + 0.22, cy - 0.22],
+                               [cx + 0.22, cy + 0.22], [cx - 0.22, cy + 0.22], [cx - 0.22, cy - 0.22]],
+                    "width": 0.1, "kind": "pin1", "ref": ref,
+                })
         # designator above the body
-        ty = c["y"] + (body["h"] / 2.0 + 1.1) if body["h"] > 0 else c["y"]
-        for idx, pts in enumerate(stroke_text(ref, c["x"], ty, size=0.85,
-                                              rot=c.get("rot", 0.0))):
-            out[layer]["text"].append({"points": [list(p) for p in pts], "width": 0.12,
-                                       "text": ref, "ref": ref})
+        if body["h"] > 0:
+            # A designator printed on a pad is clipped away by the fab, so pick an
+            # anchor that is actually clear; if none is, leave it off rather than
+            # ship silk that will disappear.
+            strokes = None
+            for ty in (c["y"] + body["h"] / 2.0 + 1.1, c["y"] - body["h"] / 2.0 - 1.1):
+                candidate = stroke_text(ref, c["x"], ty, size=0.85, rot=c.get("rot", 0.0))
+                if not _strokes_hit(candidate, side_pads[layer]):
+                    strokes = candidate
+                    break
+            for pts in strokes or []:
+                out[layer]["text"].append({"points": [list(p) for p in pts], "width": 0.12,
+                                           "text": ref, "ref": ref})
+
+    # Silkscreen must not print on exposed copper: clip every line against the
+    # mask openings on its own side.
+    for layer, rects in side_pads.items():
+        clipped = []
+        for line in out[layer]["lines"]:
+            for a, b in _clip_line_to_pads(line["points"], line.get("width", 0.12) / 2, rects):
+                clipped.append({**line, "points": [a, b]})
+        out[layer]["lines"] = clipped
     return out
+
+
+def _seg_rect_span(a, b, rect):
+    """Parameter span of segment a→b inside an axis-aligned rect (Liang-Barsky)."""
+    x0, y0, x1, y1 = rect
+    dx = b[0] - a[0]
+    dy = b[1] - a[1]
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, a[0] - x0), (dx, x1 - a[0]), (-dy, a[1] - y0), (dy, y1 - a[1])):
+        if abs(p) < 1e-12:
+            if q < 0:
+                return None
+        else:
+            r = q / p
+            if p < 0:
+                if r > t1:
+                    return None
+                t0 = max(t0, r)
+            else:
+                if r < t0:
+                    return None
+                t1 = min(t1, r)
+    return (t0, t1) if t0 < t1 else None
+
+
+def _clip_line_to_pads(points, half_width, pad_rects, mask_expansion=0.06):
+    """Split a polyline into the pieces that fall outside every mask opening.
+
+    Real fabrication clips silkscreen where it would print on exposed copper;
+    doing it here means the gerbers match what the fab would ship, and the DRC
+    check for silk-over-pad can stay at zero for generated boards.
+    """
+    if not pad_rects:
+        return points
+    grow = mask_expansion + half_width
+    out = []
+    for i in range(len(points) - 1):
+        a, b = points[i], points[i + 1]
+        spans = []
+        for rect in pad_rects:
+            span = _seg_rect_span(a, b, (rect[0] - grow, rect[1] - grow,
+                                         rect[2] + grow, rect[3] + grow))
+            if span:
+                spans.append(span)
+        if not spans:
+            out.append((a, b))
+            continue
+        spans.sort()
+        cursor = 0.0
+        for s0, s1 in spans:
+            if s0 > cursor:
+                out.append((_lerp(a, b, cursor), _lerp(a, b, s0)))
+            cursor = max(cursor, s1)
+        if cursor < 1.0:
+            out.append((_lerp(a, b, cursor), _lerp(a, b, 1.0)))
+    return out
+
+
+def _strokes_hit(strokes, rects, margin: float = 0.13) -> bool:
+    """Does any stroke of this text land on a mask opening?
+
+    The margin covers the mask expansion plus half the stroke width, so a stroke
+    that merely grazes an opening is treated as a hit — otherwise the designator
+    passes this test and the DRC check (which does expand) still flags it.
+    """
+    for stroke in strokes or []:
+        for i in range(len(stroke) - 1):
+            for rect in rects:
+                if _seg_rect_span(stroke[i], stroke[i + 1],
+                                  (rect[0] - margin, rect[1] - margin,
+                                   rect[2] + margin, rect[3] + margin)):
+                    return True
+    return False
+
+
+def _lerp(a, b, t):
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 
 
 def outline(board: Board) -> List[List[List[float]]]:

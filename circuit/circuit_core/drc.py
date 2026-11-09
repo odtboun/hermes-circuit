@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from . import geom
+from . import geom, layers as layer_mod
 from .project import Board
 
 
@@ -153,7 +153,8 @@ def check(board: Board, clearance: Optional[float] = None) -> dict:
     clearance = float(clearance if clearance is not None else rules["clearance"])
     errors: List[str] = []
     warnings: List[str] = []
-    counts = {"clearance": 0, "width": 0, "drill": 0, "edge": 0, "connectivity": 0}
+    counts = {"clearance": 0, "width": 0, "drill": 0, "edge": 0, "connectivity": 0,
+              "silk": 0}
 
     pads = _pads(board)
     traces = list(_trace_segments(board))
@@ -257,7 +258,14 @@ def check(board: Board, clearance: Optional[float] = None) -> dict:
         errors.append(f"net {net} is only partly routed ({len(by_net[net])} items in "
                       f"{len({dsu.find(_node(it)) for it in by_net[net]})} islands)")
 
-    # silkscreen over exposed copper is a warning, not an error
+    # Silkscreen over exposed copper: a fab clips it away, so the legend loses
+    # detail but the board still works — warning, not error.
+    silk_hits = _silk_over_pads(board, pads)
+    counts["silk"] = len(silk_hits)
+    warnings.extend(silk_hits[:12])
+    if len(silk_hits) > 12:
+        warnings.append(f"… {len(silk_hits) - 12} more silk-over-pad overlaps")
+
     if counts["clearance"] > 25:
         errors.append(f"… {counts['clearance'] - 25} more clearance violations")
 
@@ -270,6 +278,41 @@ def check(board: Board, clearance: Optional[float] = None) -> dict:
                     "nets": len(by_net), "clearance_mm": clearance},
         "unrouted_nets": sorted(unrouted),
     }
+
+
+def _silk_over_pads(board: Board, pads: List[dict]) -> List[str]:
+    """Silk segments that print on a mask opening, one message per pad."""
+    silk = layer_mod.silk(board)
+    by_side: Dict[str, List[Tuple[Tuple[float, float, float, float], dict]]] = {}
+    for pad in pads:
+        rect = (pad["x"] - pad["w"] / 2.0, pad["y"] - pad["h"] / 2.0,
+                pad["x"] + pad["w"] / 2.0, pad["y"] + pad["h"] / 2.0)
+        for copper_layer in pad["layers"]:
+            side = "F.SilkS" if copper_layer == "F.Cu" else "B.SilkS"
+            by_side.setdefault(side, []).append((rect, pad))
+    hits: List[str] = []
+    seen = set()
+    for side, entries in by_side.items():
+        drawn = silk.get(side, {})
+        for line in list(drawn.get("lines") or []) + list(drawn.get("text") or []):
+            hw = (line.get("width") or 0.12) / 2.0
+            pts = line.get("points") or []
+            for i in range(len(pts) - 1):
+                a, b = pts[i], pts[i + 1]
+                for rect, pad in entries:
+                    span = layer_mod._seg_rect_span(
+                        a, b, (rect[0] - hw, rect[1] - hw, rect[2] + hw, rect[3] + hw))
+                    if not span:
+                        continue
+                    key = (side, pad["ref"], pad["num"])
+                    if key in seen:
+                        break
+                    seen.add(key)
+                    hits.append(
+                        f"silk on {side[0]} overlaps the mask opening of "
+                        f"{pad['ref']}.{pad['num']} — the fab will clip it")
+                    break
+    return hits
 
 
 def _node(item: dict) -> str:
