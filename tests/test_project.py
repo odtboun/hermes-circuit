@@ -80,3 +80,38 @@ def test_duplicate_titles_get_unique_slugs(board):
     b = store.save(Board.create(board.data["title"]))
     assert a != b
     assert len(store.list_boards()) == 2
+
+
+def test_pins_can_be_addressed_by_name_or_number(board):
+    """A datasheet gives names, the geometry gives numbers — accept both."""
+    ref = board.add_component("bme280-brk", nets={"1": "+3V3"})["ref"]
+    # by name, unambiguous
+    board.set_net(ref, "SDA", "I2C_SDA")
+    assert board.component(ref)["nets"]["4"] == "I2C_SDA"
+    # by pad number, same result
+    board.set_net(ref, "4", "I2C_SDA")
+    assert board.component(ref)["nets"]["4"] == "I2C_SDA"
+    # case-insensitive
+    board.set_net(ref, "scl", "I2C_SCL")
+    assert board.component(ref)["nets"]["3"] == "I2C_SCL"
+
+
+def test_ambiguous_pin_name_says_which_pads_to_use(board):
+    ref = board.add_component("pico")["ref"]
+    with pytest.raises(BoardError) as exc:
+        board.set_net(ref, "GND", "GND")
+    message = str(exc.value)
+    assert "pins named GND" in message
+    assert "use the pad number" in message
+    # the numbers it suggests actually work
+    assert "3" in message
+    board.set_net(ref, "3", "GND")
+    assert board.component(ref)["nets"]["3"] == "GND"
+
+
+def test_unknown_pin_lists_what_the_part_has(board):
+    ref = board.add_component("ne555")["ref"]
+    with pytest.raises(BoardError) as exc:
+        board.set_net(ref, "NOPE", "X")
+    message = str(exc.value)
+    assert "no pin NOPE" in message and "known pins" in message

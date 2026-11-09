@@ -306,14 +306,30 @@ class Board:
 
     def set_net(self, ref: str, pin: str, net: str) -> None:
         c = self.component(ref)
-        fp = footprints.get(parts.get(c["part"])["footprint"])
-        if str(pin) not in {p["num"] for p in fp["pads"]}:
-            raise BoardError(f"{ref} has no pin {pin}")
+        part = parts.get(c["part"])
+        fp = footprints.get(part["footprint"])
+        nums = {p["num"] for p in fp["pads"]}
+        pin = str(pin)
+        if pin not in nums:
+            # A datasheet gives you names, not pad numbers: accept either, as long
+            # as the name is unambiguous ("SDA" for pad 4 of a BME280 breakout).
+            names = part.get("pins") or {}
+            match = [num for num, name in names.items()
+                     if str(name).lower() == pin.lower() and num in nums]
+            if len(match) == 1:
+                pin = match[0]
+            elif len(match) > 1:
+                raise BoardError(
+                    f"{ref} has {len(match)} pins named {pin} (pads {', '.join(match)}) — "
+                    f"use the pad number")
+            else:
+                known = ", ".join(f"{num}={name}" for num, name in list(names.items())[:8])
+                raise BoardError(f"{ref} has no pin {pin} (known pins: {known}…)")
         if net:
-            c["nets"][str(pin)] = canonical_net(net)
+            c["nets"][pin] = canonical_net(net)
             self._ensure_net(c["nets"][str(pin)])
         else:
-            c["nets"].pop(str(pin), None)
+            c["nets"].pop(pin, None)
         self.touch()
 
     def rename_net(self, old: str, new: str) -> None:
