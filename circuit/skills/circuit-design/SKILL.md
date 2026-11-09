@@ -60,13 +60,20 @@ placed, routed or DRC'd, and every editing tool refuses the project. Re-importin
 the same file or url replaces that project; a different file with the same name
 gets a `-2` slug. Follow it with `circuit_view` to render it.
 
-`circuit_samples` is the no-path version: `action="list"` shows real open-source
-KiCad boards (63-309 footprints) and `action="load"` with an `id` downloads one
-from the upstream KiCad demo repository and imports it read-only. Use it when the
-user wants to see what the viewer does with a dense board, or wants a reference
-design to compare against — the bundled templates are only 8-13 parts. Loads need
-network; multi-layer samples are flattened to 2 copper layers and say so in
-`warnings`.
+`circuit_samples` is the no-path version: `action="list"` shows 15 real
+open-source KiCad demo boards and `action="load"` with an `id` downloads one from
+the upstream KiCad demo repository and imports it read-only. Use it when the user
+wants to see what the viewer does with a dense board, wants a reference design to
+compare against, or just wants to browse — the bundled templates are only 8-13
+parts. Loads need network; multi-layer samples are flattened to 2 copper layers
+and say so in `warnings`.
+
+Good picks by purpose: `nfc-antenna` (one part, the whole board is a copper
+spiral), `ecc83` (15 through-hole parts, big silk lettering), `complex-hierarchy`
+(68 parts, zero vias), `stickhub` (16 x 40 mm — the small-board test),
+`multichannel` next to `multichannel-unrouted` (the same board before and after
+routing), `coldfire` (160 parts), `video` (312 mm wide), `tiny-tapeout` (309
+parts, the densest).
 
 ### "find me an open-source board for X"
 

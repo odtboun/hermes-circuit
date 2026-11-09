@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import tempfile
 import urllib.request
+from urllib.parse import quote
 from pathlib import Path
 from typing import Dict, List
 
@@ -89,11 +90,61 @@ SAMPLES: Dict[str, dict] = {
         "parts": 63, "size_mm": [160.0, 99.0], "layers": 2,
         "note": "Classic through-hole KiCad demo, 2 layers, nothing flattened.",
     },
+    "coldfire": {
+        "title": "ColdFire / Xilinx dev kit",
+        "file": "kit-dev-coldfire-xilinx_5213/kit-dev-coldfire-xilinx_5213.kicad_pcb",
+        "parts": 160, "size_mm": [157.5, 91.4], "layers": 4,
+        "note": "160 parts, 825 pads, 253 vias and 278 nets: the densest 2-row board here. 4 layers flattened to 2.",
+    },
+    "complex-hierarchy": {
+        "title": "Complex hierarchy",
+        "file": "complex_hierarchy/complex_hierarchy.kicad_pcb",
+        "parts": 68, "size_mm": [100.7, 80.0], "layers": 2,
+        "note": "The hierarchical-schematic demo: 68 footprints, 52 nets, not a single via. The cleanest board for reading silk, outlines and pad shapes.",
+    },
+    "ecc83": {
+        "title": "ECC83 valve preamp",
+        "file": "ecc83/ecc83-pp.kicad_pcb",
+        "parts": 15, "size_mm": [52.1, 46.4], "layers": 2,
+        "note": "A valve preamplifier: 15 through-hole parts with wide pads and big silk lettering. The friendliest board for close-up viewing.",
+    },
+    "interf-u": {
+        "title": "Interf-U ISA card",
+        "file": "interf_u/interf_u.kicad_pcb",
+        "parts": 24, "size_mm": [115.6, 108.2], "layers": 2,
+        "note": "ISA-bus interface card: 379 pads and 84 vias, mostly through-hole, with long parallel buses.",
+    },
+    "multichannel": {
+        "title": "Multichannel mixer",
+        "file": "multichannel/multichannel_mixer.kicad_pcb",
+        "parts": 114, "size_mm": [110.0, 111.0], "layers": 2,
+        "note": "A routed 6-channel mixer on a 110 mm square: 114 parts, 80 nets, 29 vias.",
+    },
+    "multichannel-unrouted": {
+        "title": "Multichannel mixer (unrouted)",
+        "file": "multichannel/multichannel_mixer-unrouted.kicad_pcb",
+        "parts": 114, "size_mm": [110.0, 111.0], "layers": 2,
+        "note": "The same mixer before routing — pads and outlines only. Load it next to multichannel to see exactly what routing adds.",
+    },
+    "nfc-antenna": {
+        "title": "NFC antenna",
+        "file": "royalblue54L_feather/nfc_antenna/RoyalBlue54L-NFC-Antenna/RoyalBlue54L-NFC-Antenna.kicad_pcb",
+        "parts": 1, "size_mm": [23.0, 58.0], "layers": 2,
+        "note": "One part, and the whole board is a spiral of copper. The best test of trace and coil rendering.",
+    },
+    "sonde-xilinx": {
+        "title": "Xilinx probe card",
+        "file": "sonde xilinx/sonde xilinx.kicad_pcb",
+        "parts": 25, "size_mm": [80.4, 43.2], "layers": 2,
+        "note": "Xilinx joint-test probe: 108 pads, 42 nets, through-hole with a dense header row.",
+    },
 }
 
 
 def _url(entry: dict) -> str:
-    return f"{_BASE}/{entry['file']}"
+    # Some demo paths contain spaces ("sonde xilinx/…"); quote the path but keep
+    # the separators, or the request 404s on an HTML page that looks like a board.
+    return f"{_BASE}/{quote(entry['file'])}"
 
 
 def names() -> List[dict]:
@@ -105,7 +156,7 @@ def names() -> List[dict]:
             "parts": e["parts"],
             "size_mm": e["size_mm"],
             "layers": e["layers"],
-            "license": _LICENSE,
+            "license": e.get("license", _LICENSE),
             "note": e["note"],
             "url": _url(e),
         }
@@ -136,6 +187,6 @@ def load(sample_id: str) -> dict:
         # path each time, which would otherwise create <id>-2, <id>-3, ...
         summary = import_board(str(path), key=sample_id, source=_url(entry))
     summary["sample"] = sample_id
-    summary["license"] = _LICENSE
+    summary["license"] = entry.get("license", _LICENSE)
     summary["source"] = _url(entry)
     return summary

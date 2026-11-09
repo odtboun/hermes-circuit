@@ -324,10 +324,25 @@ circuit_samples(action="list")
 circuit_samples(action="load", id="tiny-tapeout")   # 309 footprints, 104 × 81 mm
 ```
 
-`tiny-tapeout` (309 footprints, 104 × 81 mm), `openair-max` (210), `video` (189,
-312 mm wide), `cm5-minima` (112), `stickhub` (94), `royalblue54l-feather` (71),
-`pic-programmer` (63) — the best way to see what the viewer does with a genuinely
-dense board.
+Fifteen boards, 1 to 309 parts:
+
+| id | parts | board | why load it |
+|---|---|---|---|
+| `nfc-antenna` | 1 | 23 × 58 mm | the whole board is one spiral of copper |
+| `ecc83` | 15 | 52 × 46 mm | valve preamp: big through-hole pads and silk lettering |
+| `interf-u` | 24 | 116 × 108 mm | ISA card, long parallel buses, 84 vias |
+| `sonde-xilinx` | 25 | 80 × 43 mm | probe card with a dense header row |
+| `pic-programmer` | 63 | 160 × 99 mm | the classic through-hole demo |
+| `complex-hierarchy` | 68 | 101 × 80 mm | 68 parts and **zero vias** — the cleanest board |
+| `royalblue54l-feather` | 71 | 58 × 23 mm | feather module, 8 layers flattened |
+| `stickhub` | 94 | 16 × 40 mm | a USB stick: the small-board test |
+| `cm5-minima` | 112 | 61 × 64 mm | compact 6-layer carrier |
+| `multichannel` | 114 | 110 × 111 mm | routed 6-channel mixer |
+| `multichannel-unrouted` | 114 | 110 × 111 mm | the same board *before* routing |
+| `coldfire` | 160 | 158 × 91 mm | 160 parts, 825 pads, 253 vias |
+| `video` | 189 | 312 × 107 mm | a PCI-era board as wide as your monitor |
+| `openair-max` | 210 | 99 × 72 mm | mixed SMD/THT control board, 410 vias |
+| `tiny-tapeout` | 309 | 104 × 81 mm | the densest: 309 footprints, 1481 traces |
 
 ### A 3D viewer that is a real renderer
 

@@ -106,3 +106,36 @@ def test_reloading_a_sample_replaces_the_same_project(monkeypatch):
     from circuit_core import store as s2
 
     assert s2.load("pic-programmer").data["imported"] is True
+
+
+def test_catalogue_covers_the_whole_kicad_demo_set():
+    """Fifteen boards, not seven: the catalogue should be a browse, not a taste."""
+    ids = set(samples.SAMPLES)
+    for required in ("tiny-tapeout", "coldfire", "complex-hierarchy", "ecc83",
+                     "interf-u", "multichannel", "multichannel-unrouted",
+                     "nfc-antenna", "sonde-xilinx"):
+        assert required in ids, f"missing sample {required}"
+    assert len(ids) >= 15
+    # a spread of sizes, not fifteen variations of the same board
+    parts = sorted(samples.SAMPLES[s]["parts"] for s in ids)
+    assert parts[0] <= 2, "the catalogue should include a one-part board"
+    assert parts[-1] >= 250, "the catalogue should include a very dense board"
+    sizes = [max(samples.SAMPLES[s]["size_mm"]) for s in ids]
+    assert min(sizes) < 45 and max(sizes) > 300, "small and very large boards"
+
+
+def test_sample_paths_with_spaces_are_url_quoted():
+    """'sonde xilinx/sonde xilinx.kicad_pcb' would 404 as a raw URL."""
+    entry = samples.SAMPLES["sonde-xilinx"]
+    assert " " in entry["file"], "this test is pointless if the path has no space"
+    url = samples._url(entry)
+    assert " " not in url
+    assert "%20" in url
+    assert url.startswith("https://") and url.endswith(".kicad_pcb")
+
+
+def test_every_sample_has_its_own_licence_string():
+    """A future non-KiCad board can declare its own licence; the default is KiCad's."""
+    for row in samples.names():
+        assert row["license"], row["id"]
+        assert "GPL" in row["license"] or "MIT" in row["license"] or "Apache" in row["license"]
