@@ -22,7 +22,8 @@ CATALOG: Dict[str, dict] = {}
 
 def _part(pid: str, name: str, footprint: str, category: str, desc: str,
           pins: Optional[Dict[str, str]] = None, tags: Optional[List[str]] = None,
-          datasheet: str = "", verified: bool = True, attrs: Optional[dict] = None) -> dict:
+          datasheet: str = "", verified: bool = True, attrs: Optional[dict] = None,
+          mpn: str = "", mfr: str = "") -> dict:
     fp = footprints.get(footprint)
     pin_map = pins or dict(fp["pin_names"])
     missing = [p["num"] for p in fp["pads"] if p["num"] not in pin_map]
@@ -39,6 +40,10 @@ def _part(pid: str, name: str, footprint: str, category: str, desc: str,
         "datasheet": datasheet,
         "verified": verified,
         "attrs": attrs or {},
+        # Supplier identity. Blank unless a real, verified part number is known —
+        # an invented MPN is worse than an empty one.
+        "mpn": mpn,
+        "mfr": mfr,
         "mount": "tht" if any(p["kind"] == "tht" for p in fp["pads"]) else "smd",
         "pads": len(fp["pads"]),
     }

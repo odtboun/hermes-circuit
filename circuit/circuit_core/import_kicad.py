@@ -822,6 +822,9 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         group = bom_groups.setdefault(key, {
             "part": comp["part"], "value": comp["value"], "footprint": comp["footprint"],
             "description": comp["footprint"], "refs": [], "qty": 0,
+            # An imported board carries no supplier identity, but the document
+            # shape has to match the engine's so the viewer sees one format.
+            "mpn": "", "mfr": "",
         })
         group["refs"].append(comp["ref"])
         group["qty"] += 1

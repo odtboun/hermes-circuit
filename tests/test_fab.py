@@ -42,6 +42,10 @@ def test_export_wrote_the_expected_files(built):
         "pico-sensor-hub-gerbers.zip",
         "bom.csv",
         "pos.csv",
+        "pos-jlcpcb.csv",
+        "readme.txt",
+        "pico-sensor-hub.gbrjob",
+        "pico-sensor-hub-assembly.zip",
         "netlist.json",
         "preview.svg",
         "preview.html",
@@ -161,7 +165,12 @@ def test_gerber_zip_contains_every_layer(built):
         assert zf.testzip() is None
     assert "pico-sensor-hub-F_Cu.gbr" in names
     assert "pico-sensor-hub-PTH.drl" in names
-    assert len([n for n in names if n.endswith(".gbr")]) == 7
+    # 7 copper/mask/silk/edge layers plus the stencil
+    assert len([n for n in names if n.endswith(".gbr")]) == 8
+    assert "pico-sensor-hub-F_Paste.gbr" in names
+    # a fabricator reads the stackup from the zip, not from manifest.json
+    assert "readme.txt" in names
+    assert "pico-sensor-hub.gbrjob" in names
 
 
 def test_manifest_hashes_match_the_files(built):
@@ -206,3 +215,57 @@ def test_soldermask_tents_the_vias(built):
         assert "VIA" in open_refs, "tent_vias: false must expose vias"
     finally:
         board.rules["tent_vias"] = True
+
+
+def test_assembly_package_is_what_a_contract_manufacturer_quotes_from(built):
+    _board, summary = built
+    ex = Path(summary["export_dir"])
+    with zipfile.ZipFile(ex / "pico-sensor-hub-assembly.zip") as zf:
+        names = set(zf.namelist())
+        assert zf.testzip() is None
+    for required in ("bom.csv", "pos.csv", "pos-jlcpcb.csv", "readme.txt",
+                     "pico-sensor-hub-F_Paste.gbr"):
+        assert required in names, f"assembly zip is missing {required}"
+
+    # the assembly dialect: millimetres, Mid X/Y, Top/Bottom, Rotation
+    rows = (ex / "pos-jlcpcb.csv").read_text().strip().splitlines()
+    assert rows[0] == "Designator,Val,Package,Mid X,Mid Y,Layer,Rotation"
+    first = rows[1].split(",")
+    assert first[5] in ("Top", "Bottom")
+    assert 0.0 <= float(first[3]) <= 95.0 and 0.0 <= float(first[4]) <= 95.0
+
+
+def test_readme_describes_the_stackup_and_the_rules(built):
+    board, summary = built
+    ex = Path(summary["export_dir"])
+    text = (ex / "readme.txt").read_text()
+    assert board.data["title"] in text
+    assert "2 layers" in text and "1.60 mm" in text
+    assert "HASL" in text
+    assert "Vias are tented" in text
+    assert "trace / space" in text
+
+
+def test_gbrjob_maps_every_gerber_to_a_layer_role(built):
+    _board, summary = built
+    ex = Path(summary["export_dir"])
+    job = json.loads((ex / "pico-sensor-hub.gbrjob").read_text())
+    funcs = {f["FileFunction"] for f in job["FilesAttributes"]}
+    assert "Copper,L1,Top" in funcs
+    assert "Soldermask,Top" in funcs
+    assert "Profile,NP" in funcs
+    assert "Paste,Top" in funcs
+    assert job["GeneralSpecs"]["LayerNumber"] == 2
+    assert job["GeneralSpecs"]["BoardThickness"] == 1.6
+
+
+def test_bom_has_supplier_columns_and_never_invents_a_part_number(built):
+    _board, summary = built
+    ex = Path(summary["export_dir"])
+    header = (ex / "bom.csv").read_text().splitlines()[0]
+    assert header == "Refs,Qty,Value,Part,Footprint,Description,MPN,Mfr"
+    # the bundled library carries no MPNs, so the columns come through empty
+    # rather than filled with a guess
+    for line in (ex / "bom.csv").read_text().strip().splitlines()[1:]:
+        fields = line.split(",")
+        assert len(fields) == 8

@@ -235,6 +235,10 @@ def bom(board: Board) -> List[dict]:
         g = groups.setdefault(key, {
             "part": c["part"], "value": c["value"], "footprint": part["footprint"],
             "description": part["name"], "refs": [], "qty": 0,
+            # A component can carry its own supplier part number; the library value
+            # is only a default. Blank means "not known" — never invented.
+            "mpn": c.get("mpn") or part.get("mpn", ""),
+            "mfr": c.get("mfr") or part.get("mfr", ""),
         })
         g["refs"].append(c["ref"])
         g["qty"] += 1
@@ -242,6 +246,38 @@ def bom(board: Board) -> List[dict]:
     for r in rows:
         r["refs"] = sorted(r["refs"])
     rows.sort(key=lambda r: (r["refs"][0][0], r["refs"][0]))
+    return rows
+
+
+def placement_assembly(board: Board) -> List[dict]:
+    """Pick-and-place in the dialect assembly houses actually take.
+
+    Millimetres, origin bottom-left, Y measured upwards from the bottom edge
+    (this engine's Y already grows upwards, so the value is flipped relative to a
+    fab's top-down frame), layer named Top/Bottom. Bottom-side parts are mirrored
+    the way JLCPCB documents: X mirrored about the board centre and the rotation
+    reflected. A generic pos.csv is still written next to it.
+    """
+    rows = []
+    h = board.board["height"]
+    w = board.board["width"]
+    for c in board.data["components"]:
+        part = parts.get(c["part"])
+        side = c.get("side", "top")
+        x = c.get("x") or 0.0
+        y = c.get("y") or 0.0
+        rot = c.get("rot", 0.0)
+        if side == "bottom":
+            mx = w - x
+            rot = (180.0 - rot) % 360.0
+        else:
+            mx = x
+        rows.append({
+            "ref": c["ref"], "value": c["value"], "footprint": part["footprint"],
+            "mx": round(mx, 3), "my": round(h - y, 3),
+            "side": side, "rot": round(rot, 1),
+        })
+    rows.sort(key=lambda r: (r["side"], r["ref"]))
     return rows
 
 
