@@ -28,6 +28,9 @@ DEFAULT_RULES = {
     "edge_clearance": 0.30,
     "grid": 0.10,
     "chamfer": 0.35,
+    # Soldermask covers vias unless a board asks otherwise: exposed vias wick
+    # solder and short under a stencil.
+    "tent_vias": True,
 }
 
 NET_CLASS_WIDTH = {"signal": 0.20, "power": 0.30, "ground": 0.30, "diff": 0.20}

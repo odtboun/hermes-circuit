@@ -128,9 +128,21 @@ def copper(board: Board) -> Dict[str, dict]:
 
 
 def mask(board: Board, expansion: float = 0.06) -> Dict[str, dict]:
+    """Soldermask openings: every exposed pad, and — unless the board tents them —
+    every via.
+
+    Vias used to get an opening like any other flash, which leaves them exposed to
+    the solder wave and to paste slump under a stencil. Tenting (mask over the
+    via) is standard practice and is the default; set ``tent_vias: false`` in the
+    board rules to keep them open (probe points, thermal vias that must be
+    filled).
+    """
     out = {"F.Mask": {"flashes": []}, "B.Mask": {"flashes": []}}
+    tent = board.rules.get("tent_vias", True)
     for layer in ("F.Cu", "B.Cu"):
         for f in copper(board)[layer]["flashes"]:
+            if tent and f.get("ref") == "VIA":
+                continue
             out[layer.replace("Cu", "Mask")]["flashes"].append({
                 **f, "w": f["w"] + 2 * expansion, "h": f["h"] + 2 * expansion,
             })

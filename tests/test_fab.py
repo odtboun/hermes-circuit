@@ -184,3 +184,25 @@ def test_svg_renderer_is_standalone(built):
     assert text.startswith("<svg") and text.endswith("</svg>")
     html = svg.render_html(board)
     assert board.data["title"] in html
+
+
+def test_soldermask_tents_the_vias(built):
+    """An opening over every via wicks solder and shorts under a stencil."""
+    board, _summary = built
+    copper = layers.copper(board)
+    vias = [f for f in copper["F.Cu"]["flashes"] if f.get("ref") == "VIA"]
+    assert vias, "the fixture board should have at least one via"
+    for layer in ("F.Mask", "B.Mask"):
+        refs = {f.get("ref") for f in layers.mask(board)[layer]["flashes"]}
+        assert "VIA" not in refs, f"{layer} opens over a via"
+    # pads are still exposed
+    pads = [f for f in layers.mask(board)["F.Mask"]["flashes"] if f.get("ref") != "VIA"]
+    assert pads, "the mask must still open over pads"
+
+    # and the rule can turn tenting off for boards that want open vias
+    board.rules["tent_vias"] = False
+    try:
+        open_refs = {f.get("ref") for f in layers.mask(board)["F.Mask"]["flashes"]}
+        assert "VIA" in open_refs, "tent_vias: false must expose vias"
+    finally:
+        board.rules["tent_vias"] = True
