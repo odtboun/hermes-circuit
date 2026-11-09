@@ -1473,6 +1473,14 @@ function offscreen(canvas, rw, rh) {
 // scanline crosses each at most twice; interpolating 1/z along the span is
 // exact for a perspective projection. Returns the colour buffer plus the index
 // of the face that owns each pixel, which the label pass uses for visibility.
+// A scanline through a concave outline crosses it more than twice; these hold
+// the sorted crossings for one row (reused, so no per-scanline allocation).
+const SPAN_MAX = 512
+const spanX = new Float64Array(SPAN_MAX)
+const spanW = new Float64Array(SPAN_MAX)
+const spanU = new Float64Array(SPAN_MAX)
+const spanV = new Float64Array(SPAN_MAX)
+
 function zRaster(items, rw, rh) {
   const px = new Uint32Array(rw * rh)
   const zb = new Float32Array(rw * rh)
@@ -1502,80 +1510,94 @@ function zRaster(items, rw, rh) {
     if (y1 < y0 || bx1 < bx0) continue
     for (let y = y0; y <= y1; y += 1) {
       const sy = y + 0.5
-      let xl = Infinity
-      let xr = -Infinity
-      let wl = 0
-      let wr = 0
-      let uzl = 0
-      let uzr = 0
-      let vzl = 0
-      let vzr = 0
+      // Even-odd span fill. A scanline can cross a concave outline four or more
+      // times, and filling from the leftmost to the rightmost crossing painted
+      // the convex hull — which bridged every notch: an L-shaped board edge came
+      // out with the corner filled in, and a cut-out vanished. Collect every
+      // crossing, sort them, and fill between successive pairs.
+      let nCross = 0
       for (let i = 0; i < n; i += 1) {
         const a = pts[i]
         const b = pts[i + 1 === n ? 0 : i + 1]
         if ((a[1] <= sy && b[1] > sy) || (b[1] <= sy && a[1] > sy)) {
+          if (nCross >= SPAN_MAX) break
           const t = (sy - a[1]) / (b[1] - a[1])
           const x = a[0] + (b[0] - a[0]) * t
           const wi = a[2] + (b[2] - a[2]) * t
-          if (x < xl) {
-            xl = x
-            wl = wi
-            if (tex) { uzl = uvz[i][0] + (uvz[i + 1 === n ? 0 : i + 1][0] - uvz[i][0]) * t; vzl = uvz[i][1] + (uvz[i + 1 === n ? 0 : i + 1][1] - uvz[i][1]) * t }
+          const j = i + 1 === n ? 0 : i + 1
+          const uo = tex ? uvz[i][0] + (uvz[j][0] - uvz[i][0]) * t : 0
+          const vo = tex ? uvz[i][1] + (uvz[j][1] - uvz[i][1]) * t : 0
+          let k = nCross - 1
+          while (k >= 0 && spanX[k] > x) {
+            spanX[k + 1] = spanX[k]
+            spanW[k + 1] = spanW[k]
+            spanU[k + 1] = spanU[k]
+            spanV[k + 1] = spanV[k]
+            k -= 1
           }
-          if (x > xr) {
-            xr = x
-            wr = wi
-            if (tex) { uzr = uvz[i][0] + (uvz[i + 1 === n ? 0 : i + 1][0] - uvz[i][0]) * t; vzr = uvz[i][1] + (uvz[i + 1 === n ? 0 : i + 1][1] - uvz[i][1]) * t }
-          }
+          spanX[k + 1] = x
+          spanW[k + 1] = wi
+          spanU[k + 1] = uo
+          spanV[k + 1] = vo
+          nCross += 1
         }
       }
-      if (!(xl <= xr)) continue
-      const sx0 = Math.max(bx0, Math.ceil(xl - 0.5))
-      const sx1 = Math.min(bx1, Math.floor(xr - 0.5))
-      if (sx1 < sx0) continue
-      const span = xr - xl
-      const dw = span > 1e-9 ? (wr - wl) / span : 0
-      const off = sx0 + 0.5 - xl
-      let wi = wl + dw * off
-      let idx = y * rw + sx0
-      if (tex) {
-        // Silk ink is sampled from the board-space texture and blended over the
-        // substrate colour: one quad for the whole layer instead of one per
-        // glyph stroke.
-        const duz = span > 1e-9 ? (uzr - uzl) / span : 0
-        const dvz = span > 1e-9 ? (vzr - vzl) / span : 0
-        let uz = uzl + duz * off
-        let vz = vzl + dvz * off
-        for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw, uz += duz, vz += dvz) {
-          if (wi > zb[idx]) {
-            zb[idx] = wi
-            const inv = 1 / wi
-            const tx = Math.round(uz * inv)
-            const ty = Math.round(vz * inv)
-            let out = col
-            if (tx >= 0 && ty >= 0 && tx < tex.w && ty < tex.h) {
-              const t = tex.data[ty * tex.w + tx]
-              const a = t >>> 24
-              if (a > 0) {
-                const ia = 255 - a
-                const r = (((t & 255) * a + (col & 255) * ia) / 255) | 0
-                const g2 = ((((t >> 8) & 255) * a + ((col >> 8) & 255) * ia) / 255) | 0
-                const b2 = ((((t >> 16) & 255) * a + ((col >> 16) & 255) * ia) / 255) | 0
-                out = ((255 << 24) | (b2 << 16) | (g2 << 8) | r) >>> 0
+      for (let c = 0; c + 1 < nCross; c += 2) {
+        const xl = spanX[c]
+        const xr = spanX[c + 1]
+        const wl = spanW[c]
+        const wr = spanW[c + 1]
+        const sx0 = Math.max(bx0, Math.ceil(xl - 0.5))
+        const sx1 = Math.min(bx1, Math.floor(xr - 0.5))
+        if (sx1 < sx0) continue
+        const span = xr - xl
+        const dw = span > 1e-9 ? (wr - wl) / span : 0
+        const off = sx0 + 0.5 - xl
+        let wi = wl + dw * off
+        let idx = y * rw + sx0
+        if (tex) {
+          // Silk ink is sampled from the board-space texture and blended over the
+          // substrate colour: one quad for the whole layer instead of one per
+          // glyph stroke.
+          const uzl = spanU[c]
+          const uzr = spanU[c + 1]
+          const vzl = spanV[c]
+          const vzr = spanV[c + 1]
+          const duz = span > 1e-9 ? (uzr - uzl) / span : 0
+          const dvz = span > 1e-9 ? (vzr - vzl) / span : 0
+          let uz = uzl + duz * off
+          let vz = vzl + dvz * off
+          for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw, uz += duz, vz += dvz) {
+            if (wi > zb[idx]) {
+              zb[idx] = wi
+              const inv = 1 / wi
+              const tx = Math.round(uz * inv)
+              const ty = Math.round(vz * inv)
+              let out = col
+              if (tx >= 0 && ty >= 0 && tx < tex.w && ty < tex.h) {
+                const t = tex.data[ty * tex.w + tx]
+                const a = t >>> 24
+                if (a > 0) {
+                  const ia = 255 - a
+                  const r = (((t & 255) * a + (col & 255) * ia) / 255) | 0
+                  const g2 = ((((t >> 8) & 255) * a + ((col >> 8) & 255) * ia) / 255) | 0
+                  const b2 = ((((t >> 16) & 255) * a + ((col >> 16) & 255) * ia) / 255) | 0
+                  out = ((255 << 24) | (b2 << 16) | (g2 << 8) | r) >>> 0
+                }
               }
+              px[idx] = out
+              owner[idx] = fi
+              painted += 1
             }
-            px[idx] = out
-            owner[idx] = fi
-            painted += 1
           }
-        }
-      } else {
-        for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw) {
-          if (wi > zb[idx]) {
-            zb[idx] = wi
-            px[idx] = col
-            owner[idx] = fi
-            painted += 1
+        } else {
+          for (let x = sx0; x <= sx1; x += 1, idx += 1, wi += dw) {
+            if (wi > zb[idx]) {
+              zb[idx] = wi
+              px[idx] = col
+              owner[idx] = fi
+              painted += 1
+            }
           }
         }
       }

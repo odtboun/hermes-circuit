@@ -300,6 +300,18 @@ assert.equal(a1.px[mid] >>> 0, 0xff00ff00, 'the nearer quad must own the overlap
 assert.equal(a2.px[mid] >>> 0, a1.px[mid] >>> 0, 'depth order must not depend on paint order')
 assert.equal(a1.px[3 * 20 + 3] >>> 0, 0xff0000ff, 'the far quad still shows outside the overlap')
 
+// A concave outline must not be filled as its convex hull. This is a slot cut
+// into a board edge: scanlines through it cross the outline FOUR times, and a
+// min..max fill painted the slot in — the "green spills into the L corner" bug.
+const slotPoly = [[0, 0], [40, 0], [40, 30], [28, 30], [28, 12], [12, 12], [12, 30], [0, 30]]
+  .map(([x, y]) => [x, y, 1 / 50])
+const slotFill = __test__.zRaster([{ pts: slotPoly, rgb: 0xff00ff00, depth: 50 }], 60, 40)
+const at = (x, y) => slotFill.px[y * 60 + x] >>> 0
+assert.equal(at(20, 25), 0, 'the slot must stay empty (even-odd fill)')
+assert.notEqual(at(20, 6), 0, 'the board above the slot must be filled')
+assert.notEqual(at(6, 25), 0, 'the left arm must be filled')
+assert.notEqual(at(34, 25), 0, 'the right arm must be filled')
+
 const r3 = recordingContext()
 __test__.drawBoard3D(r3.ctx, view, { canvas, dpr: 2, explode: false, alpha: 1, yaw: -0.6, pitch: 0.9, dist: 120 })
 const st = canvas.__stats
