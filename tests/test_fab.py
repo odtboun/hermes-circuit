@@ -325,3 +325,36 @@ def _patched_silk(original, pad):
         })
         return out
     return silk_with_a_bad_line
+
+
+def test_export_is_byte_identical_when_the_epoch_is_pinned(tmp_path, monkeypatch):
+    """SOURCE_DATE_EPOCH makes two builds of the same board identical.
+
+    Without it the STEP header, the readme, the job file and every zip entry carry
+    "now", so the manifest hashes change on every export and cannot fingerprint a
+    design.
+    """
+    import hashlib
+    import os
+
+    monkeypatch.setenv("CIRCUIT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1700000000")
+    board = templates.instantiate("pico-blinky")
+    first = builder.build(board, effort="normal")
+    ex = Path(first["export_dir"])
+    hashes = {}
+    for rel in first["files"]:
+        p = ex / rel
+        if p.exists():
+            hashes[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+
+    second = builder.build(board, effort="normal")
+    assert set(second["files"]) == set(first["files"])
+    for rel, digest in hashes.items():
+        p = ex / rel
+        assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, f"{rel} is not reproducible"
+
+    # and the zip entries are pinned rather than stamped with the file mtime
+    with zipfile.ZipFile(ex / "pico-blinky-gerbers.zip") as zf:
+        years = {info.date_time[0] for info in zf.infolist()}
+    assert years == {2023}, years

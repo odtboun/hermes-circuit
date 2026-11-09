@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import List, Sequence, Tuple
+from typing import Optional, List, Sequence, Tuple
 
 from .. import geom
 from ..lib import footprints, parts
@@ -104,9 +104,15 @@ def _prism(s: _Step, poly: Sequence[geom.Point], z0: float, z1: float, name: str
     return s.add(f"MANIFOLD_SOLID_BREP('{name}',#{shell})")
 
 
-def write_step(board: Board) -> str:
+def write_step(board: Board, epoch: Optional[int] = None) -> str:
+    """AP214 B-rep of the substrate and component bodies.
+
+    ``epoch`` pins the timestamp in FILE_NAME so two builds of the same board are
+    byte-identical; without it the file changes on every export even when nothing
+    about the design did.
+    """
     s = _Step()
-    now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    now = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(epoch))
     ctx = s.add("APPLICATION_CONTEXT('core data for automotive mechanical design processes')")
     s.add(f"APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,#{ctx})")
     pctx = s.add(f"PRODUCT_CONTEXT('',#{ctx},'mechanical')")

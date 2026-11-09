@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import re
+import os
 import time
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -153,7 +154,14 @@ class Board:
         self._pad_cache: Optional[List[dict]] = None
 
     def touch(self) -> None:
-        self.data["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # SOURCE_DATE_EPOCH pins the stamp as well: board.json is part of the
+        # export package, and a moving timestamp there makes every hash in the
+        # manifest change on each build.
+        epoch = os.environ.get("SOURCE_DATE_EPOCH")
+        if epoch and epoch.isdigit():
+            self.data["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(epoch)))
+        else:
+            self.data["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._reindex()
 
     # ------------------------------------------------------------------ #
