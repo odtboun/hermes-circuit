@@ -23,6 +23,7 @@ provides_tools:
   - circuit_check
   - circuit_export
   - circuit_view
+  - circuit_docs
 config_schema:
   trace_width:
     type: float

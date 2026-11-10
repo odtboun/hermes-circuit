@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from . import drc, layers
+from .fab import docs as docs_mod
 from .lib import footprints, parts
 from .project import Board
 
@@ -74,6 +75,12 @@ def view_model(board: Board, files: Optional[Dict[str, dict]] = None) -> dict:
         "stats": board.stats(),
         "erc": board.erc(),
         "drc": board.data.get("drc") or {},
+        # Documents generated from this netlist (shopping list, wiring card,
+        # poster). Listed even before an export so the page can offer them.
+        "docs": [
+            {"kind": kind, "title": title, "file": fname}
+            for kind, fname, title in docs_mod.DOCS
+        ],
         "files": files or {},
         "updated": board.data.get("updated"),
     }

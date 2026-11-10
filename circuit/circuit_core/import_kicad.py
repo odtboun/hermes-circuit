@@ -883,6 +883,9 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         "erc": {"ok": True, "errors": [], "warnings": [], "info": ["imported from KiCad"]},
         "drc": dict(board_data["drc"]),
         "files": {},
+        # An imported board has no library parts, so no generated documents — but
+        # the document shape has to match the engine's.
+        "docs": [],
         "updated": now,
     }
     if not comps:

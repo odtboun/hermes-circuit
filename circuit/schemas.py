@@ -236,6 +236,28 @@ EXPORT = {
     },
 }
 
+DOCS = {
+    "name": "circuit_docs",
+    "description": (
+        "Generate the board's documents and return a chat-ready preview directive for each: "
+        "'shopping' (bill of materials with distributor search links per MPN), 'wiring' (pin → "
+        "net → destination table per connector) and 'poster' (one-page board poster with the "
+        "render, stats and top of the BOM). Files are written to the export folder. Emit the "
+        "returned preview_directive on its own line to show the document inline in the chat."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "board": BOARD_ARG,
+            "kind": {
+                "type": "string",
+                "enum": ["all", "shopping", "wiring", "poster"],
+                "description": "Which document (default all).",
+            },
+        },
+    },
+}
+
 VIEW = {
     "name": "circuit_view",
     "description": (
@@ -252,5 +274,5 @@ VIEW = {
     },
 }
 
-ALL = [CATALOG, CREATE, BOARDS, IMPORT, SAMPLES, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW]
+ALL = [CATALOG, CREATE, BOARDS, IMPORT, SAMPLES, BOARD, ADD_PART, CONNECT, REMOVE_PART, PLACE, ROUTE, CHECK, EXPORT, VIEW, DOCS]
 NAMES = [s["name"] for s in ALL]

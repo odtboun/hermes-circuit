@@ -97,3 +97,59 @@ def test_rebuild_on_an_imported_board_is_a_409_not_a_500(tmp_path):
     body = json.loads(plugin_api.board_view(slug).body)
     assert body["imported"] is True
     assert body["stats"]["components"] == 2
+
+
+def test_docs_routes_list_and_render(tmp_path, monkeypatch):
+    """The page fetches these two: the index, then the HTML for one document."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from circuit.dashboard import plugin_api
+    from circuit_core import templates
+
+    monkeypatch.setenv("CIRCUIT_DATA_DIR", str(tmp_path / "data"))
+    app = FastAPI()
+    app.include_router(plugin_api.router, prefix="/api/plugins/circuit")
+    client = TestClient(app)
+
+    board = templates.instantiate("pico-blinky")
+    plugin_api.placement.auto_place(board)
+    plugin_api.autorouter.route_board(board)
+    slug = plugin_api.store.save(board)
+
+    index = client.get(f"/api/plugins/circuit/boards/{slug}/docs")
+    assert index.status_code == 200
+    kinds = [d["kind"] for d in index.json()["documents"]]
+    assert kinds == ["shopping", "wiring", "poster"]
+
+    for kind in kinds:
+        res = client.get(f"/api/plugins/circuit/boards/{slug}/docs/{kind}")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["kind"] == kind
+        assert body["html"].startswith("<!doctype html>")
+        assert "<script" not in body["html"].lower()
+        assert body["bytes"] > 1000
+
+    missing = client.get(f"/api/plugins/circuit/boards/{slug}/docs/nope")
+    assert missing.status_code == 404
+
+
+def test_docs_route_refuses_an_imported_board(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from circuit.dashboard import plugin_api
+    from circuit_core import import_kicad
+
+    monkeypatch.setenv("CIRCUIT_DATA_DIR", str(tmp_path / "data"))
+    app = FastAPI()
+    app.include_router(plugin_api.router, prefix="/api/plugins/circuit")
+    client = TestClient(app)
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
+    slug = import_kicad.import_board(str(fixture))["board"]
+
+    res = client.get(f"/api/plugins/circuit/boards/{slug}/docs/poster")
+    assert res.status_code == 409
+    assert "imported" in res.json()["detail"]

@@ -12,6 +12,7 @@ from . import settings
 from .circuit_core import compile as builder
 from .circuit_core import drc as drc_mod
 from .circuit_core import import_kicad, placement, router, samples, store, templates, view
+from .circuit_core.fab import docs as docs_mod
 from .circuit_core.lib import parts
 from .circuit_core.project import Board, BoardError
 
@@ -379,6 +380,43 @@ def circuit_export(args: dict, **kwargs) -> str:
         return err(exc)
 
 
+def circuit_docs(args: dict, **kwargs) -> str:
+    """Generate the documents for a board and return chat-ready preview directives."""
+    try:
+        board = _board(args)
+        slug = board.data.get("slug") or ""
+        if board.data.get("imported"):
+            return err("documents are generated from the engine's part library, and an "
+                       "imported KiCad board has no library parts — call circuit_create "
+                       "to start an editable board")
+        wanted = (args.get("kind") or "all").strip().lower()
+        if wanted not in ("all", *docs_mod.KINDS):
+            return err(f"unknown document {wanted!r} (one of: all, {', '.join(docs_mod.KINDS)})")
+        ex = store.project_dir(slug) / "exports"
+        ex.mkdir(parents=True, exist_ok=True)
+        documents = []
+        for kind in docs_mod.KINDS:
+            if wanted not in ("all", kind):
+                continue
+            path = ex / docs_mod.filename(kind)
+            path.write_text(docs_mod.render(board, kind))
+            documents.append({
+                "kind": kind,
+                "title": docs_mod.title(kind),
+                "file": str(path),
+                "bytes": path.stat().st_size,
+                "preview_directive": f'::preview{{file="{path}"}}',
+            })
+        return ok(
+            board=slug,
+            documents=documents,
+            hint=("Put one preview_directive on its own line in your reply to render that "
+                  "document inline in the chat, the same way ::circuit renders the board."),
+        )
+    except Exception as exc:
+        return err(exc)
+
+
 def circuit_view(args: dict, **kwargs) -> str:
     try:
         board = _board(args)
@@ -420,4 +458,5 @@ HANDLERS = {
     "circuit_check": circuit_check,
     "circuit_export": circuit_export,
     "circuit_view": circuit_view,
+    "circuit_docs": circuit_docs,
 }

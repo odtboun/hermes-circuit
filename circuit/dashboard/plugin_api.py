@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from circuit_core import compile as builder  # noqa: E402
 from circuit_core import drc as drc_mod  # noqa: E402
 from circuit_core import placement, store, view  # noqa: E402
+from circuit_core.fab import docs as docs_mod  # noqa: E402
 from circuit_core import router as autorouter  # noqa: E402
 from circuit_core.project import BoardError  # noqa: E402
 
@@ -80,6 +81,46 @@ def file(slug: str, path: str):
     if target.suffix.lower() in {".html", ".svg"}:
         return FileResponse(target, media_type="text/html" if target.suffix == ".html" else "image/svg+xml")
     return FileResponse(target, filename=target.name)
+
+
+@router.get("/boards/{slug}/docs")
+def docs_index(slug: str):
+    """Which generated documents exist for this board, and whether they are on disk."""
+    try:
+        root = store.project_dir(slug) / "exports"
+    except BoardError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    out = []
+    for kind, fname, title in docs_mod.DOCS:
+        path = root / fname
+        out.append({"kind": kind, "title": title, "file": fname,
+                    "bytes": path.stat().st_size if path.exists() else 0,
+                    "exists": path.exists()})
+    return {"board": slug, "documents": out}
+
+
+@router.get("/boards/{slug}/docs/{kind}")
+def docs_render(slug: str, kind: str):
+    """Render one document on demand and return it as HTML text.
+
+    The desktop page shows it in an iframe via ``srcDoc``, so it does not need a
+    second origin or a file:// URL to display it.
+    """
+    if kind not in docs_mod.KINDS:
+        raise HTTPException(status_code=404, detail=f"unknown document {kind!r}")
+    try:
+        board = store.load(slug)
+    except BoardError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if board.data.get("imported"):
+        raise HTTPException(
+            status_code=409,
+            detail="documents are generated from the engine's part library, and an "
+                   "imported KiCad board has no library parts",
+        )
+    html = docs_mod.render(board, kind)
+    return {"board": slug, "kind": kind, "title": docs_mod.title(kind),
+            "file": docs_mod.filename(kind), "html": html, "bytes": len(html)}
 
 
 @router.post("/boards/{slug}/rebuild")
