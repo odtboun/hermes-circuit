@@ -2084,6 +2084,49 @@ function emptyState(title, body) {
   })
 }
 
+/** The generated documents: shopping list, wiring card, board poster.
+
+ *  Each is a standalone HTML page rendered by the engine from the same netlist as
+ *  the gerbers. It is shown in an iframe via srcDoc, so the page does not need a
+ *  second origin or a file:// URL, and the document keeps its own styling.
+ */
+function DocsTab({ ctx, view, slug }) {
+  const docs = view.docs || []
+  const [kind, setKind] = useState(docs.length ? docs[0].kind : '')
+  const doc = docs.find((d) => d.kind === kind) || docs[0] || null
+  const q = useQuery({
+    queryKey: ['circuit', 'doc', slug, kind],
+    queryFn: () => rest(ctx, `boards/${slug}/docs/${kind}`),
+    enabled: Boolean(slug && kind)
+  })
+  if (!docs.length) {
+    return emptyState(
+      'No documents for this board',
+      'The shopping list, wiring card and poster are generated from the engine part library — imported boards are read-only.'
+    )
+  }
+  const html = (q.data && q.data.html) || ''
+  const kb = q.data && q.data.bytes ? `${Math.max(1, Math.round(q.data.bytes / 102.4) / 10)} KB` : ''
+  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, gap: 8 }, children: [
+    jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }, children: [
+      ...docs.map((d) => chip(d.title, d.kind === kind, () => setKind(d.kind), undefined, d.kind)),
+      jsx('div', { style: { flex: 1 } }),
+      doc ? jsx('span', { style: { fontSize: 11.5, color: UI.faint }, children: `${doc.file}${kb ? ` · ${kb}` : ''}` }) : null
+    ] }),
+    html
+      ? jsx('iframe', {
+          title: doc ? doc.title : 'document',
+          srcDoc: html,
+          sandbox: '',
+          style: {
+            flex: 1, width: '100%', minHeight: 320, border: `1px solid ${UI.stroke}`,
+            borderRadius: 10, background: '#0a0d0b'
+          }
+        })
+      : jsx('div', { style: { ...panel, padding: '18px 20px', fontSize: 12.5, color: UI.dim }, children: q.error ? `Could not render ${kind}: ${q.error.message}` : 'Rendering…' })
+  ] })
+}
+
 function BoardPage({ ctx }) {
   const list = useBoards(ctx)
   const [slug, setSlug] = useState(() => ctx.storage.get('selected', ''))
@@ -2213,6 +2256,7 @@ function BoardPage({ ctx }) {
     ['nets', 'Nets'],
     ['bom', 'BOM'],
     ['drc', 'DRC'],
+    ['docs', 'Docs'],
     ['files', 'Files']
   ]
 
@@ -2337,6 +2381,8 @@ function BoardPage({ ctx }) {
             }, String(i))
           ) })
         : emptyState('No DRC issues', 'The board passes clearance, minimum width/drill, annular ring, edge clearance and full net connectivity.')
+    } else if (tab === 'docs') {
+      body = jsx(DocsTab, { ctx, view, slug })
     } else {
       const files = Object.keys(view.files || {}).sort()
       body = files.length
@@ -2409,5 +2455,5 @@ export default {
 export const __test__ = {
   facetsFor, shadeColor, rotMatrix, drawBoard2D, drawBoard3D, zRaster, packShaded,
   parsePackage, packageSilhouette, packageLeads, metalPlan, chipHeight, parsePitch, silkTexture, canTexture,
-  InlineBoard, BoardPage, LAYER_KEYS, PART_COLORS
+  InlineBoard, BoardPage, DocsTab, LAYER_KEYS, PART_COLORS
 }

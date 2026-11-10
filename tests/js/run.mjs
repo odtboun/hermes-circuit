@@ -336,6 +336,47 @@ assert.ok(st.drawn < st.faces, `every face drawn (${st.drawn}/${st.faces}) — c
 assert.ok(st.painted > 5000, `rasteriser wrote too few pixels (${st.painted})`)
 assert.equal(r3.calls.putImageData, 1, 'the rasterised frame is composited once')
 
+// ---- generated documents tab --------------------------------------------- //
+// The Docs tab lists the three documents and shows the selected one in an iframe
+// via srcDoc. The engine writes them; the page only has to display them.
+const docView = {
+  ...view,
+  docs: [
+    { kind: 'shopping', title: 'Shopping list', file: 'bom.html' },
+    { kind: 'wiring', title: 'Wiring card', file: 'wiring.html' },
+    { kind: 'poster', title: 'Board poster', file: 'poster.html' }
+  ]
+}
+globalThis.__QUERY_DATA = { kind: 'shopping', html: '<!doctype html><p>hi</p>', bytes: 12400 }
+const docsText = texts(__test__.DocsTab({ ctx, view: docView, slug: 'pico-sensor-hub' })).join(' ')
+for (const label of ['Shopping list', 'Wiring card', 'Board poster']) {
+  assert.ok(docsText.includes(label), `docs tab lists ${label}`)
+}
+assert.ok(docsText.includes('bom.html'), 'docs tab names the selected file')
+
+// the iframe must receive the rendered document, not an empty frame
+const docsNode = __test__.DocsTab({ ctx, view: docView, slug: 'pico-sensor-hub' })
+const findIframe = (node, depth = 0) => {
+  if (!node || typeof node !== 'object' || depth > 8) return null
+  if (node.type === 'iframe') return node
+  for (const child of [].concat((node.props && node.props.children) || [])) {
+    const hit = findIframe(child, depth + 1)
+    if (hit) return hit
+  }
+  return null
+}
+const frame = findIframe(docsNode)
+assert.ok(frame, 'the document renders in an iframe')
+assert.ok(frame.props.srcDoc.includes('<!doctype html>'), 'the iframe gets the document html')
+assert.equal(frame.props.sandbox, '', 'documents are script-free, so the iframe is sandboxed')
+
+// an imported board has no library parts, so no documents — say so instead of
+// rendering an empty frame
+globalThis.__QUERY_DATA = view
+const emptyDocs = texts(__test__.DocsTab({ ctx, view: { ...view, docs: [] }, slug: 'x' })).join(' ')
+assert.ok(emptyDocs.includes('No documents'), 'empty docs state renders')
+
+
 // ---- components render without a browser --------------------------------- //
 // Minimal renderer: executes function components (hooks are stubbed) and
 // collects every string a real React pass would put on screen.
