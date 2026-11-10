@@ -83,38 +83,48 @@ _part("led-0603", "LED 0603", "0603", "opto", "Indicator LED. Pin 1 = cathode (K
 _part("led-0805", "LED 0805", "0805", "opto", "Indicator LED. Pin 1 = cathode (K).",
       pins={"1": "K", "2": "A"}, tags=["led"], attrs={"polarized": True})
 _part("d-sod123", "Diode 1N4148W", "SOD-123", "diode", "Small-signal diode 100 V / 300 mA",
-      pins={"1": "K", "2": "A"}, tags=["diode"], attrs={"polarized": True})
+      pins={"1": "K", "2": "A"}, tags=["diode"], attrs={"polarized": True},
+      mpn="1N4148W", mfr="Diodes Incorporated")
 _part("d-zener", "Zener diode SOD-123", "SOD-123", "diode", "Zener, 3.3-15 V",
       pins={"1": "K", "2": "A"}, tags=["diode", "protection"], attrs={"polarized": True})
 _part("d-schottky", "Schottky diode SS34", "SMA", "diode", "3 A / 40 V Schottky rectifier",
-      pins={"1": "K", "2": "A"}, tags=["diode"], attrs={"polarized": True})
+      pins={"1": "K", "2": "A"}, tags=["diode"], attrs={"polarized": True},
+      mpn="SS34", mfr="MDD")
 
 # --------------------------------------------------------------------------- #
 # transistors & power
 # --------------------------------------------------------------------------- #
 _part("mmbt3904", "NPN transistor MMBT3904", "SOT-23", "transistor",
       "40 V / 200 mA NPN switch", pins={"1": "B", "2": "E", "3": "C"},
-      tags=["transistor"])
+      tags=["transistor"],
+      mpn="MMBT3904", mfr="onsemi")
 _part("ao3400", "N-MOSFET AO3400", "SOT-23", "transistor",
       "30 V / 5.7 A logic-level N-channel MOSFET", pins={"1": "G", "2": "S", "3": "D"},
-      tags=["mosfet"])
+      tags=["mosfet"],
+      mpn="AO3400A", mfr="Alpha & Omega Semiconductor")
 _part("ao3401", "P-MOSFET AO3401", "SOT-23", "transistor",
       "-30 V / -4 A logic-level P-channel MOSFET", pins={"1": "G", "2": "S", "3": "D"},
-      tags=["mosfet"])
+      tags=["mosfet"],
+      mpn="AO3401A", mfr="Alpha & Omega Semiconductor")
 _part("2n7002", "N-MOSFET 2N7002", "SOT-23", "transistor",
       "60 V / 115 mA small-signal MOSFET", pins={"1": "G", "2": "S", "3": "D"},
-      tags=["mosfet"])
+      tags=["mosfet"],
+      mpn="2N7002", mfr="onsemi")
 
 _part("ams1117-33", "LDO AMS1117-3.3", "SOT-223", "power",
       "800 mA 3.3 V LDO; tab is VOUT", pins={"1": "GND", "2": "VOUT", "3": "VIN", "4": "VOUT"},
-      tags=["regulator"])
+      tags=["regulator"],
+      mpn="AMS1117-3.3", mfr="AMS")
 _part("ams1117-50", "LDO AMS1117-5.0", "SOT-223", "power",
       "800 mA 5 V LDO; tab is VOUT", pins={"1": "GND", "2": "VOUT", "3": "VIN", "4": "VOUT"},
-      tags=["regulator"])
+      tags=["regulator"],
+      mpn="AMS1117-5.0", mfr="AMS")
 _part("xc6206-33", "LDO XC6206P332", "SOT-23", "power",
-      "200 mA 3.3 V LDO", pins={"1": "GND", "2": "VOUT", "3": "VIN"}, tags=["regulator"])
+      "200 mA 3.3 V LDO", pins={"1": "GND", "2": "VOUT", "3": "VIN"}, tags=["regulator"],
+      mpn="XC6206P332MR", mfr="Torex Semiconductor")
 _part("lm7805", "Regulator 7805", "TO-220", "power", "1.5 A 5 V linear regulator",
-      pins={"1": "IN", "2": "GND", "3": "OUT"}, tags=["regulator"])
+      pins={"1": "IN", "2": "GND", "3": "OUT"}, tags=["regulator"],
+      mpn="LM7805CT", mfr="Texas Instruments")
 _part("buck-in-1x4", "Buck converter module (IN+/IN-/OUT+/OUT-)", "header-1x4", "power",
       "Generic LM2596 / MP1584 buck module carrier", pins={"1": "IN+", "2": "IN-", "3": "OUT+", "4": "OUT-"},
       tags=["regulator", "module"])
@@ -130,26 +140,33 @@ _part("usb-power-1x2", "USB power pigtail (5V/GND)", "header-1x2", "power",
 # --------------------------------------------------------------------------- #
 _part("ne555", "NE555 timer", "SOIC-8", "ic", "Precision timer",
       pins={"1": "GND", "2": "TRIG", "3": "OUT", "4": "RESET", "5": "CTRL",
-            "6": "THR", "7": "DIS", "8": "VCC"}, tags=["timer"])
+            "6": "THR", "7": "DIS", "8": "VCC"}, tags=["timer"],
+      mpn="NE555DR", mfr="Texas Instruments")
 _part("lm358", "LM358 dual op-amp", "SOIC-8", "ic", "Dual general-purpose op-amp",
       pins={"1": "OUT1", "2": "IN1-", "3": "IN1+", "4": "GND",
-            "5": "IN2+", "6": "IN2-", "7": "OUT2", "8": "VCC"}, tags=["analog"])
+            "5": "IN2+", "6": "IN2-", "7": "OUT2", "8": "VCC"}, tags=["analog"],
+      mpn="LM358DR", mfr="Texas Instruments")
 _part("attiny85", "ATtiny85", "DIP-8", "ic", "8-bit AVR, 8 KB flash",
       pins={"1": "PB5", "2": "PB3", "3": "PB4", "4": "GND",
-            "5": "PB0", "6": "PB1", "7": "PB2", "8": "VCC"}, tags=["mcu"])
+            "5": "PB0", "6": "PB1", "7": "PB2", "8": "VCC"}, tags=["mcu"],
+      mpn="ATtiny85-20PU", mfr="Microchip")
 _part("uln2003", "ULN2003 Darlington array", "SOIC-16", "ic", "7-channel sink driver",
       pins={"1": "IN1", "2": "IN2", "3": "IN3", "4": "IN4", "5": "IN5", "6": "IN6",
             "7": "IN7", "8": "GND", "9": "COM", "10": "OUT7", "11": "OUT6", "12": "OUT5",
-            "13": "OUT4", "14": "OUT3", "15": "OUT2", "16": "OUT1"}, tags=["driver"])
+            "13": "OUT4", "14": "OUT3", "15": "OUT2", "16": "OUT1"}, tags=["driver"],
+      mpn="ULN2003ADR", mfr="Texas Instruments")
 _part("74hc595", "74HC595 shift register", "SOIC-16", "ic", "8-bit serial-in parallel-out",
       pins={"1": "QB", "2": "QC", "3": "QD", "4": "QE", "5": "QF", "6": "QG", "7": "QH",
             "8": "GND", "9": "QH2", "10": "SRCLR", "11": "SRCLK", "12": "RCLK",
-            "13": "OE", "14": "SER", "15": "QA", "16": "VCC"}, tags=["logic"])
+            "13": "OE", "14": "SER", "15": "QA", "16": "VCC"}, tags=["logic"],
+      mpn="SN74HC595DR", mfr="Texas Instruments")
 _part("pc817", "PC817 optocoupler", "DIP-4", "ic", "Phototransistor optocoupler",
-      pins={"1": "A", "2": "K", "3": "E", "4": "C"}, tags=["opto", "isolation"])
+      pins={"1": "A", "2": "K", "3": "E", "4": "C"}, tags=["opto", "isolation"],
+      mpn="PC817", mfr="Sharp")
 _part("ne555-dip", "NE555 timer (DIP-8)", "DIP-8", "ic", "Through-hole 555 timer",
       pins={"1": "GND", "2": "TRIG", "3": "OUT", "4": "RESET", "5": "CTRL",
-            "6": "THR", "7": "DIS", "8": "VCC"}, tags=["timer"])
+            "6": "THR", "7": "DIS", "8": "VCC"}, tags=["timer"],
+      mpn="NE555P", mfr="Texas Instruments")
 
 # --------------------------------------------------------------------------- #
 # sensor breakouts (carried on headers — no vendor-specific land patterns)
@@ -194,7 +211,8 @@ _part("tact-6mm", "Tactile switch 6 mm", "tact-6mm", "switch",
       "Through-hole push button; 1-2 and 3-4 are tied pairs",
       pins={"1": "A1", "2": "A2", "3": "B1", "4": "B2"}, tags=["switch"])
 _part("relay-srd", "Relay SRD-05VDC", "relay-SRD", "relay", "5 V SPDT relay",
-      pins={"1": "COIL+", "2": "COIL-", "3": "COM", "4": "NO", "5": "NC"}, tags=["relay"])
+      pins={"1": "COIL+", "2": "COIL-", "3": "COM", "4": "NO", "5": "NC"}, tags=["relay"],
+      mpn="SRD-05VDC-SL-C", mfr="Songle")
 _part("buzzer-12", "Active buzzer 12 mm", "buzzer-12mm", "audio",
       "5 V active buzzer", pins={"1": "+", "2": "-"}, tags=["audio"])
 _part("crystal-3225", "Crystal 3.2 x 2.5 mm", "crystal-3225", "timing",
