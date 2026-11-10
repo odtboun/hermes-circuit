@@ -49,6 +49,9 @@ def test_export_wrote_the_expected_files(built):
         "netlist.json",
         "preview.svg",
         "preview.html",
+        "bom.html",
+        "wiring.html",
+        "poster.html",
         "manifest.json",
     ):
         assert required in names, f"missing {required}"
@@ -223,7 +226,8 @@ def test_assembly_package_is_what_a_contract_manufacturer_quotes_from(built):
     with zipfile.ZipFile(ex / "pico-sensor-hub-assembly.zip") as zf:
         names = set(zf.namelist())
         assert zf.testzip() is None
-    for required in ("bom.csv", "pos.csv", "pos-jlcpcb.csv", "readme.txt",
+    for required in ("bom.csv", "bom.html", "wiring.html", "pos.csv",
+                     "pos-jlcpcb.csv", "readme.txt",
                      "pico-sensor-hub-F_Paste.gbr"):
         assert required in names, f"assembly zip is missing {required}"
 

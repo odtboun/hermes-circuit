@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 
 from . import drc as drc_mod
 from . import layers, placement, router, store, view
+from .fab import docs as docs_mod
 from .fab import gerber, kicad, step as step_mod, svg
 from .project import Board
 
@@ -142,11 +143,16 @@ def export_all(board: Board, slug: str) -> Dict[str, str]:
     put("netlist.json", json.dumps(board.netlist(), indent=1))
     put("preview.svg", svg.render_svg(board))
     put("preview.html", svg.render_html(board))
+    # Documents generated from the same netlist: what to buy, what to wire where,
+    # and a one-page poster. Standalone HTML, so they open anywhere.
+    put("bom.html", docs_mod.shopping_html(board))
+    put("wiring.html", docs_mod.wiring_html(board))
+    put("poster.html", docs_mod.poster_html(board))
     # assembly zip: what a contract manufacturer quotes from
     apath = ex / f"{slug}-assembly.zip"
     with zipfile.ZipFile(apath, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in ("bom.csv", "pos.csv", "pos-jlcpcb.csv", "readme.txt",
-                     f"gerbers/{slug}-F_Paste.gbr"):
+        for name in ("bom.csv", "bom.html", "wiring.html", "pos.csv",
+                     "pos-jlcpcb.csv", "readme.txt", f"gerbers/{slug}-F_Paste.gbr"):
             if name in written:
                 _zip_add(zf, written[name], Path(name).name, epoch)
     written[f"{slug}-assembly.zip"] = str(apath)
@@ -299,6 +305,8 @@ def _manifest(board: Board, written: Dict[str, str], root: Path,
             "Gerbers are RS-274X with a 4.6 metric format; drills are Excellon with a metric header.",
             "KiCad 8 project opens in the PCB editor; the schematic is intentionally not synthesised.",
             "STEP is an AP214 B-rep of the substrate and component bodies.",
+            "bom.html, wiring.html and poster.html are generated documents: the "
+            "shopping list links to distributor searches built from each MPN.",
             "Footprint geometry comes from the bundled library — verify against your supplier's datasheet before ordering.",
         ],
     }
