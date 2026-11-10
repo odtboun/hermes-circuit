@@ -156,7 +156,18 @@ def load_view(slug: str) -> dict:
     path = root / "view.json"
     if path.exists():
         try:
-            return json.loads(path.read_text())
+            doc = json.loads(path.read_text())
+            # Boards exported before the generated documents existed still have a
+            # view.json without them. Add the list on the way out so the page
+            # offers the Docs tab without needing a rebuild first. Imported boards
+            # have no library parts, so they legitimately have none.
+            if "docs" not in doc:
+                from .fab import docs as docs_mod
+
+                doc["docs"] = ([] if doc.get("imported") else
+                               [{"kind": k, "title": t, "file": f}
+                                for k, f, t in docs_mod.DOCS])
+            return doc
         except json.JSONDecodeError:
             pass
     # view missing or stale: regenerate from the model

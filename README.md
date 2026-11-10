@@ -17,7 +17,7 @@ Hermes: → circuit_create(template="pico-sensor-hub")
         → circuit_route()      → circuit_check()      → circuit_export()
 
         72 × 50 mm · 2 layers · 13 parts · 8 nets · DRC clean
-        Gerbers, Excellon drills, KiCad 8 project, STEP model — 25 files
+        Gerbers, drills, KiCad project, STEP, shopping list, poster — 28 files
         ::circuit{board="pico-sensor-hub"}
 ```
 
@@ -32,7 +32,8 @@ Hermes: → circuit_create(template="pico-sensor-hub")
 - [Install](#install)
 - [Your first board](#your-first-board)
 - [What you get: the fabrication package](#what-you-get-the-fabrication-package)
-- [The 14 tools](#the-14-tools)
+- [The 15 tools](#the-15-tools)
+- [Three documents, one line of chat](#three-documents-one-line-of-chat)
 - [Feature tour](#feature-tour)
   - [A part library with pin numbers that mean something](#a-part-library-with-pin-numbers-that-mean-something)
   - [Placement and routing that are deterministic](#placement-and-routing-that-are-deterministic)
@@ -65,7 +66,7 @@ That leads to a different architecture from a normal CAD tool:
   time and you get the same answer.
 - **Every step is a tool call with a JSON result.** `circuit_route()` returns the
   nets it failed and why. `circuit_check()` returns a verdict. `circuit_export()`
-  returns 25 files with sizes. An agent can read that, fix it, and try again.
+  returns 28 files with sizes. An agent can read that, fix it, and try again.
 - **Nothing is hidden behind a GUI.** There is no state that lives only in a
   window. If you can describe it, you can script it, diff it, or regenerate it.
 - **It runs locally and offline.** Your design never leaves the machine, and a
@@ -101,7 +102,7 @@ A real session, start to finish:
   ok · ERC clean · DRC clean
 
 > circuit_export()
-  ok · 25 files · gerbers, drills, kicad, step, bom, pos, manifest
+  ok · 28 files · gerbers, drills, kicad, step, bom, pos, manifest, documents
 ```
 
 That is the real output of that sequence, not a mock-up. Pin **names** work
@@ -181,7 +182,7 @@ circuit_export()
 
 ## What you get: the fabrication package
 
-One `circuit_export()` writes **25 files** into
+One `circuit_export()` writes **28 files** into
 `<HERMES_HOME>/plugin-data/circuit/projects/<slug>/exports/`:
 
 | group | files | what it is for |
@@ -201,11 +202,14 @@ One `circuit_export()` writes **25 files** into
 | **Data** | `netlist.json`, `board.json` | the design itself, readable and diffable |
 | | `manifest.json` | SHA-256 for every artefact, the rules, the DRC report |
 | **Human** | `preview.svg`, `preview.html` | standalone, offline, no scripts beyond one inline renderer |
+| | `bom.html` | the shopping list: every part with four distributor search links |
+| | `wiring.html` | the wiring card: pin → net → destination, one table per connector |
+| | `poster.html` | the one-page board poster: render, stats, top of the BOM |
 
 Everything a fabricator needs to *quote and build* is inside the two zips.
 Everything a human needs to *review* is a file you can open.
 
-## The 14 tools
+## The 15 tools
 
 The whole design loop is exposed as tools, so an agent can drive it and you can
 drive it by hand.
@@ -224,8 +228,44 @@ drive it by hand.
 | `circuit_check` | ERC + DRC verdict with reasons | — |
 | `circuit_export` | write the whole fabrication package | `route` |
 | `circuit_view` | render the board inline in chat | `inline` |
+| `circuit_docs` | generate the shopping list, wiring card or poster | `kind` |
 | `circuit_import` | import a `.kicad_pcb` from a path or URL | `path`, `url` |
 | `circuit_samples` | load real open-source KiCad boards on demand | `action`, `id` |
+
+## Three documents, one line of chat
+
+Every board already knows what it is made of, what every pin is for and what it
+looks like. Circuit turns that into documents you can use away from the editor:
+
+| document | what it is | who it is for |
+|---|---|---|
+| **Shopping list** (`bom.html`) | one row per BOM line — qty, value, refs, footprint, description, MPN — and four buy links per row: Digi-Key, Mouser, LCSC, Octopart | you, with a browser and a card |
+| **Wiring card** (`wiring.html`) | a table per connector: pin, pin name, net with its class colour, and every other pin on that net (`U1.36`, `R2.1`, …) | the person with a soldering iron and a cable |
+| **Board poster** (`poster.html`) | the board render as the hero, the size/layer/finish line, the DRC verdict, a stats grid and the top of the BOM | a README, a tweet, a slide, a wall |
+
+Ask for one and it appears in the chat, the same way the board does:
+
+```
+> circuit_docs(board="pico-sensor-hub", kind="poster")
+
+::preview{file="…/exports/poster.html"}
+```
+
+…and the same three documents are a **Docs** tab in the plugin page, rendered in
+place, no download and no second window.
+
+The buy links are built locally from the MPN — `digikey.com/en/products/result?keywords=BME280`
+and the same shape for the other three — so the page never calls a distributor,
+never needs an API key, and never fails on camera. When an MPN is not known yet the
+link falls back to value + footprint, and the MPN column says so instead of
+inventing a part number. Filling those in is the agent's job: it can look a part up
+and write the MPN back into the board, and the next export carries it.
+
+The pages are standalone: inline CSS, inline SVG, no scripts, no fonts to fetch, no
+images to load. They open in the preview pane, print on paper, and travel inside
+`<slug>-assembly.zip` — a contract manufacturer wants the shopping list and the
+wiring table more than the Gerbers. The layout holds from a 420 px preview up to a
+full-page print.
 
 A bundled skill (`circuit-design`) teaches the agent the workflow and the
 conventions — pin **numbers** as net keys, the order of operations, and how to read
@@ -461,7 +501,7 @@ documents the rules it was built with.
 - **Engine** — `circuit/circuit_core/`: geometry, the part library, deterministic
   placement, the maze router, an independent DRC that certifies the final copper,
   and the exporters. Standard library only.
-- **Agent surface** — `circuit/tools.py` + `circuit/schemas.py`: the 14 tools and
+- **Agent surface** — `circuit/tools.py` + `circuit/schemas.py`: the 15 tools and
   their JSON schemas, plus the bundled skill that teaches the workflow.
 - **Desktop half** — `circuit/desktop/plugin.js`: one ESM file that registers the
   transcript directive, the workspace page and a sidebar entry, and contains the

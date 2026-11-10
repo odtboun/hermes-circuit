@@ -189,3 +189,26 @@ def test_document_metadata_is_complete():
         assert docs.title(kind)
     with pytest.raises(KeyError):
         docs.render(None, "nope")
+
+
+def test_old_view_documents_gain_the_docs_list(tmp_path, monkeypatch):
+    """Boards exported before the documents existed must not need a rebuild."""
+    import json
+
+    from circuit_core import store
+
+    monkeypatch.setenv("CIRCUIT_DATA_DIR", str(tmp_path / "data"))
+    board = templates.instantiate("pico-blinky")
+    slug = store.save(board)
+    doc = store.load_view(slug)
+    doc.pop("docs", None)                      # pretend it predates the feature
+    (store.project_dir(slug) / "view.json").write_text(json.dumps(doc))
+
+    back = store.load_view(slug)
+    assert [d["kind"] for d in back["docs"]] == ["shopping", "wiring", "poster"]
+
+    # an imported board keeps its empty list: it has no library parts to document
+    doc["imported"] = True
+    doc.pop("docs", None)
+    (store.project_dir(slug) / "view.json").write_text(json.dumps(doc))
+    assert store.load_view(slug)["docs"] == []

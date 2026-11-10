@@ -122,6 +122,19 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
 .stat .v{font-size:20px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
 .hero{display:flex;justify-content:center;padding:8px 0 4px}
 .hero svg{width:100%;height:auto;max-height:460px;filter:drop-shadow(0 18px 30px rgba(0,0,0,.45))}
+/* The Docs tab in the desktop app is about 700 px wide, and the preview pane can
+   be narrower still. Drop the least critical columns rather than let the table
+   squeeze into four lines per row. */
+@media (max-width: 860px){
+  .desc{display:none}
+  .pill.buy{font-size:10.5px;padding:2px 7px}
+  body{padding:20px 20px 32px}
+}
+@media (max-width: 620px){
+  .footprint{display:none}
+  .pill.buy{display:block;margin:0 0 4px}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
 @media print{
   :root{color-scheme:light}
   body{background:#fff;color:#111;padding:0}
@@ -205,7 +218,7 @@ def _bom_row(row: dict) -> str:
         f'<tr><td class="qty">{int(row.get("qty") or 1)}</td>'
         f'<td><div class="val">{html.escape(str(row.get("value") or ""))}</div>'
         f'<div class="refs">{html.escape(refs)}</div></td>'
-        f'<td class="mono">{html.escape(str(row.get("footprint") or ""))}</td>'
+        f'<td class="mono footprint">{html.escape(str(row.get("footprint") or ""))}</td>'
         f'<td class="desc">{html.escape(str(row.get("description") or ""))}</td>'
         f'<td>{mpn_cell}</td>'
         f'<td>{links}</td></tr>'
@@ -218,8 +231,8 @@ def shopping_html(board: Board) -> str:
     with_mpn = sum(1 for r in rows if (r.get("mpn") or "").strip())
     body = (
         '<div class="card"><table><thead><tr>'
-        '<th class="qty">Qty</th><th>Value</th><th>Footprint</th><th>Description</th>'
-        '<th>MPN</th><th>Buy</th></tr></thead><tbody>'
+        '<th class="qty">Qty</th><th>Value</th><th class="footprint">Footprint</th>'
+        '<th class="desc">Description</th><th>MPN</th><th>Buy</th></tr></thead><tbody>'
         + "".join(_bom_row(r) for r in rows)
         + '</tbody></table></div>'
         f'<div class="note">{len(rows)} line(s) · {total} part(s) · {with_mpn} with a '

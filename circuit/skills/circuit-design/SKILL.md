@@ -40,16 +40,42 @@ pick-and-place.
    `readme.txt` stackup, a KiCad 8 project, an AP214 STEP, `bom.csv` (with
    MPN/Mfr columns — blank until a real part number is known), `pos.csv` plus a
    `pos-jlcpcb.csv` assembly dialect, `netlist.json`, `board.json`, an SVG/HTML
-   preview, a hashed `manifest.json`, a `-gerbers.zip` (fab) and an
-   `-assembly.zip` (BOM + PnP + stencil). Vias are tented unless the board sets
-   `tent_vias: false`. Set `SOURCE_DATE_EPOCH` to make the output byte-identical
-   across builds. Imported boards cannot be exported (read-only).
+   preview, a hashed `manifest.json`, a `-gerbers.zip` (fab), an `-assembly.zip` (BOM + PnP
+   + stencil + the shopping list and wiring card), and the three generated
+   documents below. Vias are tented unless the board sets `tent_vias: false`. Set
+   `SOURCE_DATE_EPOCH` to make the output byte-identical across builds. Imported
+   boards cannot be exported (read-only).
 9. **`circuit_view`** — returns a transcript directive; put the `directive` value
    **alone on its own line** in your reply so the board renders inline:
 
    ```
    ::circuit{board="pico-blinky"}
    ```
+
+10. **`circuit_docs`** — generates the board's documents and returns a directive
+    for each. `kind` is `shopping`, `wiring`, `poster` or `all` (default).
+
+    - `shopping` → `bom.html`: one row per BOM line with qty, value, refs,
+      footprint, description, MPN and four buy links (Digi-Key, Mouser, LCSC,
+      Octopart). The links are built locally from the MPN, falling back to value
+      + footprint when the MPN is blank — no network call, no API key.
+    - `wiring` → `wiring.html`: one table per connector — pin, pin name, net with
+      its class colour, and every other pin on that net.
+    - `poster` → `poster.html`: the board render as a hero, the size/layer/finish
+      line, the DRC verdict, a stats grid and the top of the BOM.
+
+    Put a returned `preview_directive` **alone on its own line** to show that
+    document inline in the chat:
+
+    ```
+    ::preview{file="…/exports/poster.html"}
+    ```
+
+    The documents are also a **Docs** tab in the plugin page, and they are written
+    into every export. If the user wants prices or stock, that is a separate job:
+    look the MPN up, cite the source, and write the MPN back into the board — the
+    plugin owns the page and the fields, the agent owns the lookup. Never invent an
+    MPN; an empty cell is honest.
 
 ## Opening an existing KiCad board (read-only)
 
