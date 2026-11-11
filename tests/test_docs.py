@@ -33,9 +33,34 @@ def _strip_tags(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
 
-# --------------------------------------------------------------------------- #
-# shopping list
-# --------------------------------------------------------------------------- #
+def test_tables_cannot_widen_the_page(board):
+    """Fixed layout plus per-column widths. An imported board carries footprints like
+    `kit-dev-coldfire:DSUB-9_Female_Horizontal_P2.77x2.84mm_EdgePinOffset9.40mm`, and
+    with auto layout one such cell pushed the table 600 px past the viewport."""
+    for kind in docs.KINDS:
+        html = docs.render(board, kind)
+        if "<table" not in html:
+            continue
+        assert "table-layout:fixed" in html, kind
+        assert html.count("<colgroup>") == html.count("<table"), kind
+        assert "overflow-wrap:anywhere" in html, kind
+
+
+def test_a_long_reference_list_is_counted_not_printed():
+    """A 40-capacitor line lists 100-odd references, which wraps into a 400 px row at
+    the width of the Docs tab. The cell shows the first few and counts the rest, and
+    keeps the whole list in the tooltip."""
+    cell = docs._refs_cell({"refs": [f"C{i}" for i in range(1, 41)]})
+    shown = re.search(r'>([^<]*)</div>', cell).group(1)
+    assert shown.startswith("C1 C2 C3 C4 C5 C6 C7 C8 ")
+    assert shown.endswith(" +32")
+    assert "C9 " not in shown
+    assert 'title="C1 C2' in cell and "C40" in cell
+
+    short = docs._refs_cell({"refs": ["R1", "R2"]})
+    assert "+" not in re.search(r'>([^<]*)</div>', short).group(1)
+    assert docs._refs_cell({"refs": []}) == ""
+
 
 def test_shopping_list_has_a_row_per_bom_line(board):
     html = docs.shopping_html(board)

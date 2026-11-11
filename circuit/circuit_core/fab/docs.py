@@ -222,10 +222,12 @@ h1{font-size:23px;line-height:1.2;margin:0 0 6px;letter-spacing:-0.01em}
   border-radius:14px;padding:18px 20px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
 .card + .card{margin-top:16px}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-table{width:100%;border-collapse:collapse}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
 thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--faint);font-weight:600;padding:0 10px 10px;border-bottom:1px solid var(--line)}
-tbody td{padding:11px 10px;border-bottom:1px solid rgba(255,255,255,.045);vertical-align:top}
+  color:var(--faint);font-weight:600;padding:0 10px 10px;border-bottom:1px solid var(--line);
+  overflow-wrap:anywhere}
+tbody td{padding:11px 10px;border-bottom:1px solid rgba(255,255,255,.045);vertical-align:top;
+  overflow-wrap:anywhere}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover{background:rgba(127,199,161,.045)}
 .qty{font-family:var(--mono);color:var(--dim);width:46px}
@@ -262,11 +264,17 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
    squeeze into four lines per row. */
 @media (max-width: 860px){
   .desc{display:none}
-  .pill.buy{font-size:10.5px;padding:2px 7px}
   body{padding:20px 20px 32px}
+  tbody td{padding:9px 7px}
+  thead th{padding:0 7px 9px}
+  /* Four distributor pills in a 110 px column stack one per line and the row
+     grows to 400 px. Smaller pills fit two per line and the row stays readable. */
+  .pill.buy{font-size:10px;padding:2px 6px;margin:0 3px 3px 0}
+}
+@media (max-width: 720px){
+  .footprint{display:none}
 }
 @media (max-width: 620px){
-  .footprint{display:none}
   .pill.buy{display:block;margin:0 0 4px}
   .stats{grid-template-columns:repeat(2,1fr)}
 }
@@ -386,6 +394,22 @@ def search_links(mpn: str, value: str, footprint: str) -> List[Tuple[str, str]]:
     return [(name, pattern.format(q=q)) for name, pattern in _DISTRIBUTORS]
 
 
+# A 40-capacitor line lists 100-odd references, which wraps into a 400 px row at the
+# width of the Docs tab. Show the first few and count the rest; the full list is in
+# the CSV and in the tooltip.
+_REFS_SHOWN = 8
+
+
+def _refs_cell(row: dict) -> str:
+    refs = list(row.get("refs") or [])
+    if not refs:
+        return ""
+    shown = " ".join(refs[:_REFS_SHOWN])
+    if len(refs) > _REFS_SHOWN:
+        shown += f' +{len(refs) - _REFS_SHOWN}'
+    return f'<div class="refs" title="{html.escape(" ".join(refs))}">{html.escape(shown)}</div>'
+
+
 def _bom_row(row: dict) -> str:
     refs = " ".join(row.get("refs") or [])
     mpn = (row.get("mpn") or "").strip()
@@ -410,8 +434,7 @@ def _bom_row(row: dict) -> str:
         mpn_cell = '<span class="muted">—</span>'
     return (
         f'<tr><td class="qty">{int(row.get("qty") or 1)}</td>'
-        f'<td><div class="val">{html.escape(value)}</div>'
-        f'<div class="refs">{html.escape(refs)}</div></td>'
+        f'<td><div class="val">{html.escape(value)}</div>{_refs_cell(row)}</td>'
         f'<td class="mono footprint">{html.escape(footprint)}</td>'
         f'<td class="desc">{html.escape(str(row.get("description") or ""))}</td>'
         f'<td>{mpn_cell}</td>'
@@ -425,7 +448,10 @@ def shopping_html(src: Source) -> str:
     total = sum(int(r.get("qty") or 1) for r in rows)
     with_mpn = sum(1 for r in rows if (r.get("mpn") or "").strip())
     body = (
-        '<div class="card"><table><thead><tr>'
+        '<div class="card"><table>'
+        '<colgroup><col style="width:54px"><col style="width:15%"><col style="width:20%">'
+        '<col style="width:21%"><col style="width:16%"><col></colgroup>'
+        '<thead><tr>'
         '<th class="qty">Qty</th><th>Value</th><th class="footprint">Footprint</th>'
         '<th class="desc">Description</th><th>MPN</th><th>Buy</th></tr></thead><tbody>'
         + "".join(_bom_row(r) for r in rows)
@@ -526,13 +552,16 @@ def wiring_html(src: Source) -> str:
         head = ('<th class="pin">Pin</th>'
                 + ('<th>Name</th>' if show_names else "")
                 + '<th>Net</th><th>Also on this net</th>')
+        cols = ('<colgroup><col style="width:62px">'
+                + ('<col style="width:16%">' if show_names else "")
+                + '<col style="width:32%"><col></colgroup>')
         blocks.append(
             '<div class="card"><div class="conn-head">'
             f'<div class="conn-ref">{html.escape(card["ref"])}'
             f'<span class="conn-part" style="margin-left:10px">'
             f'{html.escape(card["footprint"])}</span></div>'
             f'<div class="sub">{html.escape(card["value"])}</div></div>'
-            f'<table><thead><tr>{head}</tr></thead><tbody>'
+            f'<table>{cols}<thead><tr>{head}</tr></thead><tbody>'
             + "".join(body_rows) + '</tbody></table></div>'
         )
 
@@ -591,7 +620,9 @@ def poster_html(src: Source) -> str:
     body = (
         f'<div class="card"><div class="hero">{svg}</div></div>'
         f'<div class="card"><div class="stats">{stats_grid}</div></div>'
-        '<div class="card"><table><thead><tr><th class="qty">Qty</th><th>Value</th>'
+        '<div class="card"><table>'
+        '<colgroup><col style="width:54px"><col style="width:24%"><col></colgroup>'
+        '<thead><tr><th class="qty">Qty</th><th>Value</th>'
         f'<th>Footprint</th></tr></thead><tbody>{bom_rows}</tbody></table>'
         f'<div class="note">{len(rows)} BOM line(s) · '
         f'{sum(int(r.get("qty") or 1) for r in rows)} part(s).</div></div>'
