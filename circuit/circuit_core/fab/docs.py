@@ -65,7 +65,7 @@ _CSS = """
 :root{
   color-scheme: dark;
   --bg:#0a0d0b; --panel:#111614; --panel2:#151b18; --line:#243029;
-  --text:#e8e4d8; --dim:#98a29b; --faint:#6d776f; --accent:#7fc7a1;
+  --text:#e8e4d8; --dim:#9aa49d; --faint:#7f8a81; --accent:#7fc7a1;
   --power:#e0a458; --gnd:#8d978f; --signal:#7fc7a1; --warn:#d9a45f;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
 }
@@ -121,7 +121,7 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
 .stat .k{color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em}
 .stat .v{font-size:20px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
 .hero{display:flex;justify-content:center;padding:8px 0 4px}
-.hero svg{width:100%;height:auto;max-height:460px;filter:drop-shadow(0 18px 30px rgba(0,0,0,.45))}
+.hero svg{width:100%;height:auto;max-height:620px;filter:drop-shadow(0 18px 30px rgba(0,0,0,.45))}
 /* The Docs tab in the desktop app is about 700 px wide, and the preview pane can
    be narrower still. Drop the least critical columns rather than let the table
    squeeze into four lines per row. */
@@ -142,6 +142,16 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
   thead th{color:#666} .desc,.sub,.refs,.note,.dest{color:#555}
   a{color:#0b6b46} .pill{border-color:#ddd;color:#333}
   .stat{background:#fafafa}
+  /* On paper the render lands at roughly the board's real size (88 mm board ->
+     250 px at 96 dpi ~ 66 mm tall), which keeps the poster on one page and makes
+     the printout a usable reference. */
+  .hero svg{max-height:250px}
+  .card{break-inside:avoid;padding:12px 14px}
+  .card + .card{margin-top:10px}
+  tbody td{padding:7px 10px}
+  .stats{gap:8px;grid-template-columns:repeat(3,1fr)}
+  .stat{padding:6px 9px}
+  .stat .v{font-size:17px}
 }
 """
 

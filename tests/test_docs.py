@@ -212,3 +212,12 @@ def test_old_view_documents_gain_the_docs_list(tmp_path, monkeypatch):
     doc.pop("docs", None)
     (store.project_dir(slug) / "view.json").write_text(json.dumps(doc))
     assert store.load_view(slug)["docs"] == []
+
+
+def test_documents_carry_a_print_layout(board):
+    """These are meant to be printed: light colours, no card split across pages."""
+    for kind in docs.KINDS:
+        html = docs.render(board, kind)
+        assert "@media print" in html
+        assert "color-scheme:light" in html
+        assert "break-inside:avoid" in html
