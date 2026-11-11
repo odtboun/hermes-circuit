@@ -440,3 +440,55 @@ console.log(JSON.stringify({
   draw3d: { fill: r3.calls.fill, lineTo: r3.calls.lineTo },
   components: view.components.length
 }, null, 2))
+
+// ---- explode ------------------------------------------------------------- //
+// The exploded view has to move a part as one rigid body: if only the lid rises,
+// the part just looks slightly taller and the button appears dead.
+{
+  const zRange = (faces) => {
+    const zs = faces.flatMap((f) => f.pts.map((p) => p[2]))
+    return [Math.min(...zs), Math.max(...zs)]
+  }
+  const flat = __test__.facetsFor(view, { explode: false, layers: {} })
+  const blown = __test__.facetsFor(view, { explode: true, layers: {} })
+
+  const boardZ = (faces) => zRange(faces.filter((f) => f.obj === 'board'))
+  assert.deepEqual(boardZ(blown), boardZ(flat), 'the board does not move')
+
+  // pick the tallest part and compare every one of its faces
+  const byObject = new Map()
+  for (const f of flat) {
+    if (!f.obj || !f.obj.startsWith('part:')) continue
+    const list = byObject.get(f.obj) || []
+    list.push(f)
+    byObject.set(f.obj, list)
+  }
+  let moved = 0
+  for (const [obj, faces] of byObject) {
+    const after = blown.filter((f) => f.obj === obj)
+    assert.equal(after.length, faces.length, `${obj}: same faces after exploding`)
+    const [z0a, z1a] = zRange(faces)
+    const [z0b, z1b] = zRange(after)
+    const riseBase = z0b - z0a
+    const riseTop = z1b - z1a
+    assert.ok(riseBase > 4, `${obj}: base rises clear of the board (${riseBase.toFixed(2)} mm)`)
+    assert.ok(Math.abs(riseBase - riseTop) < 0.01,
+      `${obj}: rigid body — base and top rise together (${riseBase.toFixed(2)} vs ${riseTop.toFixed(2)})`)
+    moved += 1
+  }
+  assert.ok(moved > 5, 'several parts are lifted')
+
+  // taller parts rise further, so the stack separates instead of moving as a slab
+  const heights = [...byObject.entries()].map(([obj, faces]) => {
+    const [, z1] = zRange(faces)
+    const after = blown.filter((f) => f.obj === obj)
+    return [z1 - zRange(faces)[0], zRange(after)[1] - z1]
+  })
+  const tallest = heights.reduce((a, b) => (b[0] > a[0] ? b : a))
+  const shortest = heights.reduce((a, b) => (b[0] < a[0] ? b : a))
+  assert.ok(tallest[1] > shortest[1], 'a taller part lifts further than a short one')
+
+  // and the chip is a 3D control: a flat view has no depth to separate
+  const flatChips = texts(__test__.BoardPage({ ctx })).join(' ')
+  assert.ok(!flatChips.includes('Explode'), 'no explode chip in the 2D view')
+}

@@ -810,7 +810,6 @@ function facetsFor(view, opts) {
   const faces = []
   const th = view.board.thickness || 1.6
   const outline = view.outline || []
-  const lift = opts.explode ? 6 : 0
   // The same layer chips drive 2D and 3D, so a toggle means the same thing in
   // both views. Anything not explicitly off is on.
   const L = opts.layers || {}
@@ -849,9 +848,9 @@ function facetsFor(view, opts) {
 
   // A solid: top face plus one quad per side. Used for bodies and for every
   // piece of metal (leads, posts, tabs), so a lead cannot drift from its pad.
-  const pushPrism = (poly, zBottom, zTop, color, rank, extra) => {
+  const pushPrism = (poly, zBottom, zTop, color, rank, liftAmount = 0, extra) => {
     if (!poly || poly.length < 3) return
-    pushPoly(poly.map((p) => [p[0], p[1], zTop]), color, [0, 0, 1], 0, 'top', rank, extra)
+    pushPoly(poly.map((p) => [p[0], p[1], zTop]), color, [0, 0, 1], liftAmount, 'top', rank, extra)
     for (let i = 0; i < poly.length; i += 1) {
       const p = poly[i]
       const q = poly[(i + 1) % poly.length]
@@ -864,7 +863,7 @@ function facetsFor(view, opts) {
         ],
         color,
         [q[1] - p[1], -(q[0] - p[0]), 0],
-        0,
+        liftAmount,
         'top',
         rank
       )
@@ -1026,16 +1025,24 @@ function facetsFor(view, opts) {
     const prof = parsePackage(comp)
     const color = bodyColor(comp, prof)
     const z0 = th + 0.06
-    const z1 = z0 + Math.max(0.3, prof.z || b.z || 1)
+    const height = Math.max(0.3, prof.z || b.z || 1)
+    const z1 = z0 + height
     const pins = comp.pins || []
+    // Exploded view: the board stays put and every part rises clear of it, taller
+    // parts further, so the stack reads as a stack. It has to move as ONE rigid
+    // body — lifting only the lid just made the part look slightly taller, which
+    // is why the button appeared to do nothing.
+    const partLift = opts.explode ? Math.min(14, 5 + height * 0.9) : 0
 
     if (prof.shape !== 'none') {
       const corners = packageSilhouette(comp, prof)
 
-      // shadow: same footprint at the body's base, offset in screen space at draw
-      pushPoly(corners.map((p) => [p[0], p[1], z0]), color, [0, 0, 1], 0, 'top', 2.5, { shadow: true })
+      // shadow: same footprint at the body's base, offset in screen space at draw.
+      // A part that is floating in an exploded view has no contact shadow to cast.
+      pushPoly(corners.map((p) => [p[0], p[1], z0]), color, [0, 0, 1], partLift, 'top', 2.5,
+        opts.explode ? null : { shadow: true })
 
-      pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], lift, 'top', 3, {
+      pushPoly(corners.map((p) => [p[0], p[1], z1]), color, [0, 0, 1], partLift, 'top', 3, {
         label: { text: comp.ref, w: b.w, h: b.h, ink: inkFor(color) },
         pin1: pins.length ? [pins[0].x, pins[0].y, z1 + 0.01] : null
       })
@@ -1052,7 +1059,7 @@ function facetsFor(view, opts) {
           ],
           color,
           n,
-          lift,
+          partLift,
           'top',
           3
         )
@@ -1066,7 +1073,7 @@ function facetsFor(view, opts) {
           const a = (i / 12) * Math.PI * 2
           lens.push([comp.x + Math.cos(a) * r, comp.y + Math.sin(a) * r])
         }
-        pushPrism(lens, z1, z1 + Math.max(0.15, prof.z * 0.4), lightenHex(color, 1.45), 3.2)
+        pushPrism(lens, z1, z1 + Math.max(0.15, prof.z * 0.4), lightenHex(color, 1.45), 3.2, partLift)
       }
 
       // socket holes: one dark recess per pin, which is what you actually see
@@ -1079,7 +1086,7 @@ function facetsFor(view, opts) {
             const a = (i / 8) * Math.PI * 2 + Math.PI / 8
             hole.push([pin.x + Math.cos(a) * r, pin.y + Math.sin(a) * r])
           }
-          pushPoly(hole.map((q) => [q[0], q[1], z1 + 0.005]), SLOT_INK, [0, 0, 1], lift, 'top', 3.05)
+          pushPoly(hole.map((q) => [q[0], q[1], z1 + 0.005]), SLOT_INK, [0, 0, 1], partLift, 'top', 3.05)
         }
       }
 
@@ -1087,14 +1094,14 @@ function facetsFor(view, opts) {
       if (prof.slot) {
         const quad = localQuad(comp, -b.w / 2 + Math.min(b.w * 0.16, 1.2), -b.h / 2,
           b.w / 2 - Math.min(b.w * 0.16, 1.2), -b.h / 2 + b.h * prof.slot)
-        pushPoly(quad.map((p) => [p[0], p[1], z1 + 0.01]), SLOT_INK, [0, 0, 1], lift, 'top', 3.1)
+        pushPoly(quad.map((p) => [p[0], p[1], z1 + 0.01]), SLOT_INK, [0, 0, 1], partLift, 'top', 3.1)
       }
     }
 
     // ---- metal -----------------------------------------------------------
     const plan = metalPlan(comp)
     for (const cap of plan.caps) {
-      pushPoly(cap.quad.map((p) => [p[0], p[1], z1 + 0.004]), METAL, [0, 0, 1], lift, 'top', 3.5)
+      pushPoly(cap.quad.map((p) => [p[0], p[1], z1 + 0.004]), METAL, [0, 0, 1], partLift, 'top', 3.5)
       pushPoly(
         [
           [cap.outer[0][0], cap.outer[0][1], z0 + 0.02],
@@ -1104,13 +1111,13 @@ function facetsFor(view, opts) {
         ],
         METAL,
         cap.normal,
-        lift,
+        partLift,
         'top',
         3.5
       )
     }
     for (const lead of packageLeads(comp, prof)) {
-      pushPrism(lead.quad, th + lead.z0, th + lead.z1, METAL, 3.5)
+      pushPrism(lead.quad, th + lead.z0, th + lead.z1, METAL, 3.5, partLift)
     }
   }
   return faces
@@ -2378,7 +2385,8 @@ function BoardPage({ ctx }) {
           }),
           jsxs('div', { style: { display: 'flex', gap: 8, alignItems: 'center', paddingTop: 10, flexWrap: 'wrap' }, children: [
             jsx(LayerChips, { layers, setLayers }),
-            chip('Explode', layers.explode, () => setLayers({ ...layers, explode: !layers.explode })),
+            // a flat view has no depth to separate: the chip is a 3D control
+            mode === '3d' ? chip('Explode', layers.explode, () => setLayers({ ...layers, explode: !layers.explode })) : null,
             jsx('div', { style: { flex: 1 } }),
             jsx('span', { style: { fontSize: 11.5, color: hot ? UI.accent : UI.faint }, children: hot ? `net ${hot}` : mode === '2d' ? 'hover a pad · drag to pan · scroll to zoom' : 'drag to orbit · scroll to zoom' })
           ] })
