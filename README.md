@@ -21,21 +21,24 @@ Hermes: → circuit_create(template="pico-sensor-hub")
         ::circuit{board="pico-sensor-hub"}
 ```
 
-![A routed two-layer board, rendered in 3D by the plugin](docs/assets/board-3d.png)
+![The Tiny Tapeout demo board, rendered in 3D by the plugin](docs/assets/board-3d.png)
 
 ---
 
 ## Screenshots
 
-Two views of the same board — the 3D model the plugin renders itself, and the 2D
-layer stackup with copper, mask, silk and drills on separate toggles:
+Two views of the same board — **Tiny Tapeout's demo board**, imported from KiCad:
+299 components, 114 nets, 104 × 81 mm. The 3D model is rendered by the plugin
+itself, and the 2D layer stackup keeps copper, mask, silk and drills on separate
+toggles:
 
 | 3D | 2D |
 |---|---|
 | ![3D view](docs/assets/board-3d.png) | ![2D layer stackup](docs/assets/board-2d.png) |
 
 Exploded view separates every component from the board, taller parts rising
-further, so you can see what sits on what:
+further, so you can see what sits on what — the same 299-component board, each part
+lifted by 5 mm plus most of its own height (capped at 14 mm):
 
 ![Exploded 3D view](docs/assets/board-3d-explode.png)
 
