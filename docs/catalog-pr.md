@@ -4,7 +4,7 @@ Everything below is what the entry PR needs, in the order the guide asks for it.
 
 - Entry file to add to `NousResearch/hermes-agent`: [`docs/catalog-entry.yaml`](catalog-entry.yaml)
   → save it as `plugin-catalog/circuit.yaml`.
-- Pinned commit: `40c9d5bcaf4fcdfe9063668a7bff9dd069ec8bc1` (the entry file in this
+- Pinned commit: `c972d665a8c460049cf95948ac2a482b755d2b57` (the entry file in this
   repo is one commit later; the pin is the commit that contains the plugin, the
   README and the images).
 - Validation, run against this tree:
