@@ -262,8 +262,10 @@ link falls back to value + footprint, and the MPN column says so instead of
 inventing a part number. Filling those in is the agent's job: it can look a part up
 and write the MPN back into the board, and the next export carries it.
 
-The pages are standalone: inline CSS, inline SVG, no scripts, no fonts to fetch, no
-images to load. They open in the preview pane, print on paper, and travel inside
+The pages are standalone: inline CSS, inline SVG, no fonts to fetch, no images to
+load, and one small inline script whose only job is to hand a buy link to the
+desktop app when the page is shown inside it (in a browser the links are just
+links). They open in the preview pane, print on paper, and travel inside
 `<slug>-assembly.zip` — a contract manufacturer wants the shopping list and the
 wiring table more than the Gerbers. The layout holds from a 420 px preview up to a
 full-page print.
@@ -687,7 +689,8 @@ then route again. The loop is fast on purpose.
 **Does anything leave my machine?**
 No. The engine is local, the viewer is local, and the only network calls in the
 whole plugin are `circuit_samples` and `circuit_import url=`, which you invoke
-explicitly to fetch a board.
+explicitly to fetch a board. Buy links are built locally from the part number —
+the plugin never contacts a distributor. Opening one opens your browser.
 
 **How do I make the output reproducible?**
 `SOURCE_DATE_EPOCH=<unix time>` in the environment before exporting. Two builds then

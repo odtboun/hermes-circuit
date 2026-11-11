@@ -172,8 +172,10 @@ def test_documents_are_self_contained(board):
         html = docs.render(board, kind)
         assert html.startswith("<!doctype html>")
         assert "<style>" in html
-        # nothing that loads: no scripts, no <link>, no @import, no src=
-        assert "<script" not in html.lower()
+        # nothing that loads: no <link>, no @import, no src= — and the one script
+        # is the buy-link forwarder, which needs no network and no DOM access
+        assert html.count("<script") == 1, "only the link forwarder"
+        assert "circuit-doc-open" in html
         assert "<link" not in html.lower()
         assert "@import" not in html
         assert 'src="' not in html
@@ -264,7 +266,7 @@ def test_imported_board_gets_all_three_documents(imported_doc):
     for kind in docs.KINDS:
         html = docs.render_view(imported_doc, kind)
         assert html.startswith("<!doctype html>")
-        assert "<script" not in html.lower()
+        assert html.count("<script") == 1        # the buy-link forwarder only
         assert "imported KiCad design" in html
 
 

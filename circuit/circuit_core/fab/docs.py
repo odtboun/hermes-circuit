@@ -291,6 +291,20 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
 """
 
 
+# The desktop app denies window.open and target=_blank from every frame, so a buy
+# link inside one cannot reach the browser on its own. This forwarder hands the URL
+# to the page that embeds the document, which opens it through the audited
+# openExternal channel. Inert anywhere else: no parent, no listener, no effect.
+_LINK_SCRIPT = (
+    "<script>(function(){"
+    "addEventListener('click',function(e){"
+    "var a=e.target&&e.target.closest?e.target.closest('a[href^=\"http\"]'):null;"
+    "if(!a||!window.parent||window.parent===window)return;"
+    "e.preventDefault();"
+    "parent.postMessage({type:'circuit-doc-open',url:a.href},'*')},true)})()</script>"
+)
+
+
 def _shell(title_text: str, kicker: str, subtitle: str, right: str, body: str) -> str:
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
@@ -301,7 +315,7 @@ def _shell(title_text: str, kicker: str, subtitle: str, right: str, body: str) -
         f"<div class=\"kicker\">{html.escape(kicker)}</div>"
         f"<h1>{html.escape(title_text)}</h1>"
         f"<div class=\"sub\">{html.escape(subtitle)}</div></div>"
-        f"<div>{right}</div></header>{body}</div></body></html>"
+        f"<div>{right}</div></header>{body}</div>{_LINK_SCRIPT}</body></html>"
     )
 
 

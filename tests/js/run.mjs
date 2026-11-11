@@ -372,12 +372,10 @@ assert.ok(frame.props.srcDoc.includes('<!doctype html>'), 'the iframe gets the d
 // this page and nothing else
 assert.equal(frame.props.sandbox, 'allow-scripts', 'the frame is sandboxed to an opaque origin')
 
-// Buy links cannot use window.open (the app denies it for every frame), so the
-// page injects a click handler that forwards the URL to the audited bridge.
-assert.ok(frame.props.srcDoc.includes('circuit-doc-open'), 'the frame carries the link handler')
-assert.ok(!globalThis.__QUERY_DATA.html.includes('<script'), 'the document file itself stays script-free')
-assert.ok(frame.props.srcDoc.indexOf('circuit-doc-open') > frame.props.srcDoc.indexOf('</table>'),
-  'the handler is appended at the end of the body, not into the markup')
+// The page must not inject markup into the document (the catalog validator refuses
+// it): the document carries its own buy-link forwarder, and the page only listens.
+assert.equal(frame.props.srcDoc, globalThis.__QUERY_DATA.html,
+  'the document is framed exactly as the engine wrote it')
 
 // an imported board has no library parts, so no documents — say so instead of
 // rendering an empty frame
