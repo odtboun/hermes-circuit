@@ -712,6 +712,13 @@ sized from the package geometry the viewer uses.
 the parts (`circuit_place(positions=…)`), widen the board, or lower the clearance —
 then route again. The loop is fast on purpose.
 
+**How long does routing take?**
+Placement and the DRC are instant, so the iteration loop is cheap. The autorouter is
+the cost: a 13-part board routes in well under a second, the 39-part relay
+controller in `pico-relay-4` takes about two and a half minutes at normal effort on
+two layers. Bigger boards want a bigger outline and a deliberate layout — the
+router searches a grid, and space is what it is short of.
+
 **Does anything leave my machine?**
 No. The engine is local, the viewer is local, and the only network calls in the
 whole plugin are `circuit_samples` and `circuit_import url=`, which you invoke
