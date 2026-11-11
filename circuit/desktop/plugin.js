@@ -2304,7 +2304,7 @@ function BoardPage({ ctx }) {
       jsx('div', { style: { fontSize: 14, fontWeight: 650, color: UI.text }, children: view ? view.title : 'Circuit' }),
       view ? jsx('span', { style: { fontSize: 11.5, color: UI.faint }, children: `${view.board.width} × ${view.board.height} mm · ${view.board.layers} layer · ${view.board.thickness} mm` }) : null,
       view ? jsx(DrcBadge, { drc: view.drc }) : null,
-      view && view.imported ? jsx(Badge, { variant: 'muted', children: 'imported · read-only' }) : null,
+      view && view.imported ? jsx(Badge, { variant: 'muted', children: 'imported' }) : null,
       jsx('div', { style: { flex: 1 } }),
       note ? jsx('span', { style: { fontSize: 11.5, color: UI.dim }, children: note }) : null,
       jsxs('div', { style: { display: 'flex', gap: 4, ...panel, padding: 3 }, children: [
