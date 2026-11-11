@@ -13,6 +13,7 @@ from typing import Dict, List
 from .. import geom, layers
 from ..project import Board
 
+# Layer view: every copper side in its own colour, the way an EDA tool draws it.
 PALETTE = {
     "board": "#0b2b1e",
     "board_edge": "#d9b26a",
@@ -22,6 +23,20 @@ PALETTE = {
     "B.SilkS": "#9aa39c",
     "drill": "#06120c",
     "pad": "#d8b25c",
+}
+
+# Product view: what the board looks like finished — green mask over the copper,
+# gold pads, white silk. Used for the poster, where the render is the hero.
+PRODUCT_PALETTE = {
+    "board": "#14663a",
+    "board_edge": "#e0be6a",
+    "F.Cu": "#4a9e70",
+    "B.Cu": "#2b6b4a",
+    "F.SilkS": "#f6f2e6",
+    "B.SilkS": "#2b6b4a",
+    "drill": "#08110d",
+    "pad": "#f0d24a",
+    "pad_bottom": "#b8983c",
 }
 
 
@@ -43,7 +58,22 @@ def _pad_svg(f: dict, color: str) -> str:
             f' rx="{min(w, h) * 0.12:.3f}" fill="{color}"{tf}/>')
 
 
-def render_svg(board: Board, standalone: bool = True, background: bool = True) -> str:
+def render_svg(board: Board, standalone: bool = True, background: bool = True,
+               style: str = "layer") -> str:
+    """Render the board as SVG.
+
+    ``style="layer"`` draws each copper side in its own colour — the design view,
+    good for reviewing what is on which layer. ``style="product"`` draws the
+    finished board: mask green over the copper, gold pads, white silk.
+    """
+    pal = PRODUCT_PALETTE if style == "product" else PALETTE
+    product = style == "product"
+    trace = {"B.Cu": pal["B.Cu"], "F.Cu": pal["F.Cu"]}
+    if product:
+        flash = {"B.Cu": pal["pad_bottom"], "F.Cu": pal["pad"]}
+    else:
+        flash = {"B.Cu": pal["B.Cu"], "F.Cu": pal["F.Cu"]}
+    silk_opacity = 1 if product else 0.9
     w, h = board.board["width"], board.board["height"]
     margin = 2.0
     copper = layers.copper(board)
@@ -53,30 +83,31 @@ def render_svg(board: Board, standalone: bool = True, background: bool = True) -
 
     parts: List[str] = []
     if background:
-        parts.append(f'<rect x="0" y="0" width="{w}" height="{h}" fill="{PALETTE["board"]}"/>')
+        parts.append(f'<rect x="0" y="0" width="{w}" height="{h}" fill="{pal["board"]}"/>')
     # bottom copper first, then top
     for layer_id in ("B.Cu", "F.Cu"):
         g: List[str] = []
         for d in copper[layer_id]["draws"]:
             g.append(f'<polyline points="{" ".join(_pt(p) for p in d["points"])}" fill="none"'
-                     f' stroke="{PALETTE[layer_id]}" stroke-width="{d["width"]:.3f}"'
+                     f' stroke="{trace[layer_id]}" stroke-width="{d["width"]:.3f}"'
                      f' stroke-linecap="round" stroke-linejoin="round"/>')
         for f in copper[layer_id]["flashes"]:
-            g.append(_pad_svg(f, PALETTE[layer_id]))
+            g.append(_pad_svg(f, flash[layer_id]))
         parts.append(f'<g id="layer-{layer_id}" data-layer="{layer_id}">' + "".join(g) + "</g>")
     # silk
     g = []
     for ln in silk["F.SilkS"]["lines"] + silk["F.SilkS"]["text"]:
         g.append(f'<polyline points="{" ".join(_pt(p) for p in ln["points"])}" fill="none"'
-                 f' stroke="{PALETTE["F.SilkS"]}" stroke-width="{ln["width"]:.3f}" opacity="0.9"/>')
+                 f' stroke="{pal["F.SilkS"]}" stroke-width="{ln["width"]:.3f}"'
+                 f' opacity="{silk_opacity}"/>')
     parts.append('<g id="layer-F.SilkS" data-layer="F.SilkS">' + "".join(g) + "</g>")
     # drills
     g = [f'<circle cx="{d["x"]:.3f}" cy="{d["y"]:.3f}" r="{d["diameter"] / 2:.3f}"'
-         f' fill="{PALETTE["drill"]}"/>' for d in drills]
+         f' fill="{pal["drill"]}"/>' for d in drills]
     parts.append('<g id="layer-drill" data-layer="drill">' + "".join(g) + "</g>")
     # outline
     parts.append(f'<polyline points="{" ".join(_pt(p) for p in outline + [outline[0]])}"'
-                 f' fill="none" stroke="{PALETTE["board_edge"]}" stroke-width="0.15"/>')
+                 f' fill="none" stroke="{pal["board_edge"]}" stroke-width="0.15"/>')
 
     body = "".join(parts)
     svg = (

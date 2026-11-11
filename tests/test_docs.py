@@ -221,3 +221,21 @@ def test_documents_carry_a_print_layout(board):
         assert "@media print" in html
         assert "color-scheme:light" in html
         assert "break-inside:avoid" in html
+
+
+def test_the_poster_hero_is_the_finished_board_not_a_layer_diagram(board):
+    """The poster is the artefact people look at: green mask, gold pads, white silk."""
+    from circuit_core.fab import svg as svg_mod
+
+    layer = svg_mod.render_svg(board)
+    product = svg_mod.render_svg(board, style="product")
+    # the design view draws each copper side in its own colour
+    assert svg_mod.PALETTE["F.Cu"] in layer and svg_mod.PALETTE["B.Cu"] in layer
+    # the product view does not: both sides sit under the same green mask
+    assert svg_mod.PALETTE["F.Cu"] not in product
+    assert svg_mod.PALETTE["B.Cu"] not in product
+    assert svg_mod.PRODUCT_PALETTE["pad"] in product
+    assert svg_mod.PRODUCT_PALETTE["board"] in product
+    # and the poster uses it
+    assert svg_mod.PRODUCT_PALETTE["pad"] in docs.poster_html(board)
+    assert svg_mod.PALETTE["F.Cu"] not in docs.poster_html(board)

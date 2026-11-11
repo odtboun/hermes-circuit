@@ -376,7 +376,7 @@ def wiring_html(board: Board) -> str:
 def poster_html(board: Board) -> str:
     stats = board.stats()
     b = board.board
-    svg = svg_mod.render_svg(board)
+    svg = svg_mod.render_svg(board, style="product")
     # Strip the XML prolog if present; keep one inline <svg> for the hero.
     if svg.lstrip().startswith("<?xml"):
         svg = svg.split("?>", 1)[1].lstrip()
