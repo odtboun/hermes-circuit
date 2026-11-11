@@ -128,7 +128,8 @@ def test_docs_routes_list_and_render(tmp_path, monkeypatch):
         body = res.json()
         assert body["kind"] == kind
         assert body["html"].startswith("<!doctype html>")
-        assert "<script" not in body["html"].lower()
+        # the only script is the buy-link forwarder; nothing else loads or runs
+        assert body["html"].count("<script") == 1
         assert body["bytes"] > 1000
 
     missing = client.get(f"/api/plugins/circuit/boards/{slug}/docs/nope")
