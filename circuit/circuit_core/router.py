@@ -58,7 +58,12 @@ class Router:
         self.net_ids: Dict[str, int] = {}
         self.id_nets: Dict[int, str] = {}
         self.failed: List[dict] = []
-        self.via_radius = (self.r["via_diameter"] / 2.0 + self.r["clearance"] + 0.15)
+        # Route to the rule plus a hair. The grid rounds to 0.1 mm and corners are
+        # chamfered after the fact, so a router that aims exactly at the clearance
+        # lands a hundredth of a millimetre inside it — a DRC error on a board that
+        # was routed "correctly".
+        self.clear = float(self.r["clearance"]) + 0.1
+        self.via_radius = (self.r["via_diameter"] / 2.0 + self.clear + 0.15)
         self.max_half = max(
             [self.r["trace_width"]] + [m.get("width", 0.0) for m in board.data["nets"].values()]
         ) / 2.0
@@ -147,11 +152,17 @@ class Router:
                 d = geom.dist((ix * self.grid, iy * self.grid), (x, y))
                 if d <= r_via:
                     vo = vinc[row + ix]
-                    if vo == _FREE or vo == net_id:
+                    if vo == _FREE:
                         vinc[row + ix] = net_id
+                    elif vo != net_id and vo != _BLOCKED:
+                        vinc[row + ix] = _BLOCKED
                 if d <= r_hard:
                     if o == _FREE or o == net_id:
                         own[row + ix] = net_id
+                    elif o != _BLOCKED:
+                        # within the hard radius of two different nets: copper here
+                        # is too close to one of them whichever net it carries
+                        own[row + ix] = _BLOCKED
                 elif d <= r_soft:
                     if o == _FREE and not pen[row + ix]:
                         pen[row + ix] = int(_SOFT)
@@ -161,7 +172,7 @@ class Router:
         poly = geom.pad_outline(pad["shape"], pad["x"], pad["y"], pad["w"], pad["h"],
                                 pad.get("rot", 0.0), pad.get("r", 0.0))
         bx = geom.bbox(poly)
-        r_hard = self.r["clearance"] + self.max_half + 0.02
+        r_hard = self.clear + self.max_half + 0.02
         r_soft = r_hard + 0.12
         # A via is copper on BOTH layers with an annular ring around the drill, so
         # it has to clear a pad just like a trace does. Without this the router
@@ -222,11 +233,20 @@ class Router:
     # A*
     # ------------------------------------------------------------------ #
     def _via_ok(self, layer: int, ix: int, iy: int, net_id: int) -> bool:
-        """O(1): both layers must be clear for a via at this cell."""
+        """O(1): both layers must be clear for a via at this cell.
+
+        `owner` is checked as well as `vowner`: a via is an annular ring of copper,
+        so it has to keep the same distance from a trace that a trace keeps from a
+        pad. Checking only the via-halo map let a via land on top of a trace whose
+        own halo had been claimed under a different net.
+        """
         ci = self.idx(ix, iy)
         for l in (0, 1):
             o = self.vowner[l][ci]
             if o != _FREE and o != net_id:
+                return False
+            t = self.owner[l][ci]
+            if t != _FREE and t != net_id:
                 return False
         return True
 
@@ -383,7 +403,7 @@ class Router:
                             vias.append({"x": vx, "y": vy, "net": net,
                                          "diameter": self.r["via_diameter"],
                                          "drill": self.r["via_drill"]})
-                r_hard = width / 2.0 + self.r["clearance"] + self.max_half
+                r_hard = width / 2.0 + self.clear + self.max_half
                 r_soft = r_hard + 0.15
                 # Claim the copper that will actually be drawn, not the grid cells
                 # it came from: the segments are chamfered at corners, and a 0.35 mm
