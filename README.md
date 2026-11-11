@@ -162,6 +162,7 @@ circuit_view()
 | `pico-blinky` | Raspberry Pi Pico carrier with an LED and a resistor — the smallest useful board |
 | `pico-sensor-hub` | Pico + BME280 over I²C + OLED header — a real sensor node |
 | `nano-relay` | Arduino Nano + ULN2003 + two relays + screw terminals — 88 × 62 mm |
+| `pico-relay-4` | Four-channel relay controller: Pico, ULN2003, protected 5 V input, four screw terminals, status LEDs, test points — 39 parts, hand-placed, 90 × 116 mm |
 | `power-5v` | 5 V regulator with bulk and decoupling — the front end of everything else |
 
 **2. Build it part by part** (the agent's normal path):
