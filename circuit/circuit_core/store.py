@@ -164,9 +164,8 @@ def load_view(slug: str) -> dict:
             if "docs" not in doc:
                 from .fab import docs as docs_mod
 
-                doc["docs"] = ([] if doc.get("imported") else
-                               [{"kind": k, "title": t, "file": f}
-                                for k, f, t in docs_mod.DOCS])
+                doc["docs"] = [{"kind": k, "title": t, "file": f}
+                               for k, f, t in docs_mod.DOCS]
             return doc
         except json.JSONDecodeError:
             pass

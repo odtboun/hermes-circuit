@@ -8,6 +8,7 @@ the outside world to display.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import quote_plus
 
 import pytest
@@ -207,11 +208,12 @@ def test_old_view_documents_gain_the_docs_list(tmp_path, monkeypatch):
     back = store.load_view(slug)
     assert [d["kind"] for d in back["docs"]] == ["shopping", "wiring", "poster"]
 
-    # an imported board keeps its empty list: it has no library parts to document
+    # an imported board gets them too: its documents are built from the stored
+    # view document rather than the part library
     doc["imported"] = True
     doc.pop("docs", None)
     (store.project_dir(slug) / "view.json").write_text(json.dumps(doc))
-    assert store.load_view(slug)["docs"] == []
+    assert [d["kind"] for d in store.load_view(slug)["docs"]] == ["shopping", "wiring", "poster"]
 
 
 def test_documents_carry_a_print_layout(board):
@@ -239,3 +241,66 @@ def test_the_poster_hero_is_the_finished_board_not_a_layer_diagram(board):
     # and the poster uses it
     assert svg_mod.PRODUCT_PALETTE["pad"] in docs.poster_html(board)
     assert svg_mod.PALETTE["F.Cu"] not in docs.poster_html(board)
+
+
+# --------------------------------------------------------------------------- #
+# imported boards
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture(scope="module")
+def imported_doc(tmp_path_factory):
+    """An imported board's stored view document — no part library involved."""
+    import os
+
+    from circuit_core import import_kicad
+
+    os.environ.setdefault("CIRCUIT_DATA_DIR", str(tmp_path_factory.mktemp("imp-data")))
+    fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
+    _board, doc, _warnings = import_kicad.parse_board(fixture)
+    return doc
+
+
+def test_imported_board_gets_all_three_documents(imported_doc):
+    for kind in docs.KINDS:
+        html = docs.render_view(imported_doc, kind)
+        assert html.startswith("<!doctype html>")
+        assert "<script" not in html.lower()
+        assert "imported KiCad design" in html
+
+
+def test_imported_shopping_list_is_built_from_the_stored_bom(imported_doc):
+    html = docs.render_view(imported_doc, "shopping")
+    rows = imported_doc["bom"]
+    assert html.count("<tr>") == len(rows) + 1
+    for row in rows[:5]:
+        assert " ".join(row["refs"]) in html
+
+
+def test_imported_wiring_card_uses_the_stored_pins(imported_doc):
+    html = docs.render_view(imported_doc, "wiring")
+    connectors = [c for c in imported_doc["components"]
+                  if docs._is_connector({"footprint": c["footprint"],
+                                         "part_name": c["footprint"]})]
+    if not connectors:
+        assert "no connectors" in html
+        return
+    ref = connectors[0]["ref"]
+    assert f'class="conn-ref">{ref}<' in html
+    for pin in connectors[0]["pins"]:
+        assert f'class="pin">{pin["num"]}</td>' in html
+
+
+def test_imported_poster_renders_the_stored_copper(imported_doc):
+    html = docs.render_view(imported_doc, "poster")
+    assert "<svg" in html and "</svg>" in html
+    assert "<path" in html            # traces, grouped by width
+    assert "<circle" in html          # drills and round pads
+    assert "not DRC-checked" in html  # an import never ran DRC
+
+
+def test_a_board_without_drc_does_not_claim_it_is_clean():
+    b = templates.instantiate("pico-blinky")
+    b.data.pop("drc", None)
+    html = docs.shopping_html(b)
+    assert "not DRC-checked" in html
+    assert "DRC clean" not in html

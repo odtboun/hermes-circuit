@@ -2100,7 +2100,14 @@ const DOC_LINK_SCRIPT =
   'addEventListener("click",function(e){' +
   'var a=e.target&&e.target.closest?e.target.closest(\'a[href^="http"]\'):null;' +
   'if(!a)return;e.preventDefault();' +
-  'parent.postMessage({type:"circuit-doc-open",url:a.href},"*")},true)})()</script>'
+  'parent.postMessage({type:"circuit-doc-open",url:a.href},"*")},true);' +
+  // The frame is as tall as the document, so the whole list is one scroll of the
+  // tab instead of a second scrollbar inside a short frame.
+  'function post(){parent.postMessage({type:"circuit-doc-size",' +
+  'height:document.documentElement.scrollHeight},"*")}' +
+  'addEventListener("load",post);post();' +
+  'if(typeof ResizeObserver==="function"){new ResizeObserver(post).observe(document.documentElement)}' +
+  '})()</script>'
 
 function withDocLinks(html) {
   if (!html) return html
@@ -2120,6 +2127,7 @@ function openExternalUrl(url) {
 function DocsTab({ ctx, view, slug }) {
   const docs = view.docs || []
   const frameRef = useRef(null)
+  const [docHeight, setDocHeight] = useState(0)
   const [kind, setKind] = useState(docs.length ? docs[0].kind : '')
   const doc = docs.find((d) => d.kind === kind) || docs[0] || null
   const q = useQuery({
@@ -2132,7 +2140,12 @@ function DocsTab({ ctx, view, slug }) {
       const frame = frameRef.current
       if (!frame || event.source !== frame.contentWindow) return
       const data = event.data
-      if (!data || data.type !== 'circuit-doc-open') return
+      if (!data) return
+      if (data.type === 'circuit-doc-size' && Number.isFinite(data.height) && data.height > 0) {
+        setDocHeight(Math.round(data.height))
+        return
+      }
+      if (data.type !== 'circuit-doc-open') return
       openExternalUrl(data.url)
     }
     window.addEventListener('message', onMessage)
@@ -2151,7 +2164,7 @@ function DocsTab({ ctx, view, slug }) {
     }
     return emptyState(
       'No documents for this board',
-      'The shopping list, wiring card and poster are generated from the engine part library — imported boards are read-only.'
+      'The shopping list, wiring card and poster are built from the board itself — a board with no parts has nothing to put on them.'
     )
   }
   const html = (q.data && q.data.html) || ''
@@ -2171,8 +2184,8 @@ function DocsTab({ ctx, view, slug }) {
           // can talk to this page, and can touch nothing else.
           sandbox: 'allow-scripts',
           style: {
-            flex: 1, width: '100%', minHeight: 320, border: `1px solid ${UI.stroke}`,
-            borderRadius: 10, background: '#0a0d0b'
+            width: '100%', height: Math.max(320, docHeight || 320), border: `1px solid ${UI.stroke}`,
+            borderRadius: 10, background: '#0a0d0b', display: 'block'
           }
         })
       : jsx('div', { style: { ...panel, padding: '18px 20px', fontSize: 12.5, color: UI.dim }, children: q.error ? `Could not render ${kind}: ${q.error.message}` : 'Rendering…' })

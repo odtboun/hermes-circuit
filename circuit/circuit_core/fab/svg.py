@@ -8,7 +8,7 @@ desktop viewer does its own canvas drawing, but both read the same geometry.
 from __future__ import annotations
 
 import html
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from .. import geom, layers
 from ..project import Board
@@ -44,6 +44,22 @@ def _pt(p) -> str:
     return f"{round(float(p[0]), 3)},{round(float(p[1]), 3)}"
 
 
+def _strokes(items: List[dict]) -> List[Tuple[float, str]]:
+    """Group polylines into (stroke width, SVG path data) pairs.
+
+    One <path> per width instead of one <polyline> per segment: same geometry,
+    a fraction of the bytes, and the browser draws it in one pass.
+    """
+    groups: Dict[float, List[str]] = {}
+    for item in items:
+        points = item.get("points") or []
+        if len(points) < 2:
+            continue
+        d = "M" + "L".join(f"{float(p[0]):.2f} {float(p[1]):.2f}" for p in points)
+        groups.setdefault(round(float(item.get("width") or 0.15), 3), []).append(d)
+    return [(width, "".join(segs)) for width, segs in sorted(groups.items())]
+
+
 def _pad_svg(f: dict, color: str) -> str:
     x, y, w, h = f["x"], f["y"], f["w"], f["h"]
     rot = f.get("rot", 0.0) % 360.0
@@ -66,6 +82,35 @@ def render_svg(board: Board, standalone: bool = True, background: bool = True,
     good for reviewing what is on which layer. ``style="product"`` draws the
     finished board: mask green over the copper, gold pads, white silk.
     """
+    return render_pieces(
+        width=board.board["width"], height=board.board["height"],
+        copper=layers.copper(board), silk=layers.silk(board),
+        drills=layers.drills(board), outline=board.outline(10),
+        title=board.data.get("title", "Board"), background=background, style=style,
+    )
+
+
+def render_svg_view(view: dict, background: bool = True, style: str = "layer") -> str:
+    """Render an imported board from its stored view document.
+
+    An imported KiCad board has no library parts, so nothing that walks the part
+    catalog works on it — but the view document already carries the copper, silk,
+    drills and outline, which is everything the renderer needs.
+    """
+    return render_pieces(
+        width=view["board"]["width"], height=view["board"]["height"],
+        copper=view["copper"], silk=view["silk"], drills=view.get("drills") or [],
+        outline=[tuple(p) for p in view["outline"]],
+        title=view.get("title") or "Board", background=background, style=style,
+    )
+
+
+def render_pieces(width: float, height: float, copper: dict, silk: dict, drills: list,
+                  outline: list, title: str, background: bool = True,
+                  style: str = "layer") -> str:
+    """The renderer itself: geometry in, SVG out, no board model involved."""
+    w, h = width, height
+    margin = 2.0
     pal = PRODUCT_PALETTE if style == "product" else PALETTE
     product = style == "product"
     trace = {"B.Cu": pal["B.Cu"], "F.Cu": pal["F.Cu"]}
@@ -74,49 +119,47 @@ def render_svg(board: Board, standalone: bool = True, background: bool = True,
     else:
         flash = {"B.Cu": pal["B.Cu"], "F.Cu": pal["F.Cu"]}
     silk_opacity = 1 if product else 0.9
-    w, h = board.board["width"], board.board["height"]
-    margin = 2.0
-    copper = layers.copper(board)
-    silk = layers.silk(board)
-    drills = layers.drills(board)
-    outline = board.outline(10)
 
     parts: List[str] = []
     if background:
         parts.append(f'<rect x="0" y="0" width="{w}" height="{h}" fill="{pal["board"]}"/>')
-    # bottom copper first, then top
+    # bottom copper first, then top. Traces are grouped into one path per stroke
+    # width: a board like `video` has 8k segments, and 8k <polyline> wrappers cost
+    # about a megabyte of HTML for the same picture.
     for layer_id in ("B.Cu", "F.Cu"):
         g: List[str] = []
-        for d in copper[layer_id]["draws"]:
-            g.append(f'<polyline points="{" ".join(_pt(p) for p in d["points"])}" fill="none"'
-                     f' stroke="{trace[layer_id]}" stroke-width="{d["width"]:.3f}"'
-                     f' stroke-linecap="round" stroke-linejoin="round"/>')
-        for f in copper[layer_id]["flashes"]:
+        for width, d in _strokes((copper.get(layer_id) or {}).get("draws") or []):
+            g.append(f'<path d="{d}" fill="none" stroke="{trace[layer_id]}"'
+                     f' stroke-width="{width:.3f}" stroke-linecap="round"'
+                     f' stroke-linejoin="round"/>')
+        for f in (copper.get(layer_id) or {}).get("flashes") or []:
             g.append(_pad_svg(f, flash[layer_id]))
         parts.append(f'<g id="layer-{layer_id}" data-layer="{layer_id}">' + "".join(g) + "</g>")
     # silk
+    front = (silk or {}).get("F.SilkS") or {}
     g = []
-    for ln in silk["F.SilkS"]["lines"] + silk["F.SilkS"]["text"]:
-        g.append(f'<polyline points="{" ".join(_pt(p) for p in ln["points"])}" fill="none"'
-                 f' stroke="{pal["F.SilkS"]}" stroke-width="{ln["width"]:.3f}"'
-                 f' opacity="{silk_opacity}"/>')
+    for width, d in _strokes((front.get("lines") or []) + (front.get("text") or [])):
+        g.append(f'<path d="{d}" fill="none" stroke="{pal["F.SilkS"]}"'
+                 f' stroke-width="{width:.3f}" opacity="{silk_opacity}"/>')
     parts.append('<g id="layer-F.SilkS" data-layer="F.SilkS">' + "".join(g) + "</g>")
     # drills
-    g = [f'<circle cx="{d["x"]:.3f}" cy="{d["y"]:.3f}" r="{d["diameter"] / 2:.3f}"'
-         f' fill="{pal["drill"]}"/>' for d in drills]
+    # the engine calls it "diameter", a stored view document calls it "d"
+    g = [f'<circle cx="{d["x"]:.3f}" cy="{d["y"]:.3f}"'
+         f' r="{(d.get("diameter") or d.get("d") or 0.0) / 2:.3f}"'
+         f' fill="{pal["drill"]}"/>' for d in drills or []]
     parts.append('<g id="layer-drill" data-layer="drill">' + "".join(g) + "</g>")
     # outline
-    parts.append(f'<polyline points="{" ".join(_pt(p) for p in outline + [outline[0]])}"'
-                 f' fill="none" stroke="{pal["board_edge"]}" stroke-width="0.15"/>')
+    if outline:
+        parts.append(f'<polyline points="{" ".join(_pt(p) for p in outline + [outline[0]])}"'
+                     f' fill="none" stroke="{pal["board_edge"]}" stroke-width="0.15"/>')
 
     body = "".join(parts)
-    svg = (
+    return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-margin} {-margin} '
         f'{w + 2 * margin} {h + 2 * margin}" width="{w + 2 * margin}mm" '
-        f'height="{h + 2 * margin}mm" role="img" aria-label="{html.escape(board.data["title"])}">'
+        f'height="{h + 2 * margin}mm" role="img" aria-label="{html.escape(title)}">'
         f'<g transform="translate(0 {h}) scale(1 -1)">{body}</g></svg>'
     )
-    return svg
 
 
 _HTML = """<!doctype html>

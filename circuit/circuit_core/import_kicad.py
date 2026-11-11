@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import store
 from .layers import stroke_text
+from .fab import docs as docs_mod
 from .project import DEFAULT_RULES, NET_CLASS_WIDTH, Board, BoardError, net_class
 
 Point = Tuple[float, float]
@@ -883,9 +884,10 @@ def parse_board(path: Path) -> Tuple[Board, dict, List[str]]:
         "erc": {"ok": True, "errors": [], "warnings": [], "info": ["imported from KiCad"]},
         "drc": dict(board_data["drc"]),
         "files": {},
-        # An imported board has no library parts, so no generated documents — but
-        # the document shape has to match the engine's.
-        "docs": [],
+        # Same shape as the engine's view document: an imported board gets the
+        # same three documents, built from this document instead of the library.
+        "docs": [{"kind": kind, "title": title, "file": fname}
+                 for kind, fname, title in docs_mod.DOCS],
         "updated": now,
     }
     if not comps:

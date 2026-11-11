@@ -7,11 +7,17 @@ paper, and travel inside an export zip without any of it breaking.
 The plugin owns the *shape* of the information: which parts to buy, which pin goes
 where, what the board looks like. Facts that need the internet (manufacturer part
 numbers) are the agent's job and land in ``bom.csv`` before these pages render.
+
+Two sources feed the same three renderers. An editable board is walked through the
+part library. An imported KiCad board has no library parts at all, so its documents
+are built from the view document the importer stored — which already carries the
+BOM, the pins, the nets and the copper.
 """
 
 from __future__ import annotations
 
 import html
+from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Tuple
 from urllib.parse import quote_plus
 
@@ -47,14 +53,142 @@ def title(kind: str) -> str:
 
 
 def render(board: Board, kind: str) -> str:
-    """Render one document by kind."""
+    """Render one document for an editable board."""
+    if kind not in KINDS:
+        raise KeyError(kind)
+    return render_source(_from_board(board), kind)
+
+
+def render_view(view: dict, kind: str) -> str:
+    """Render one document for an imported board, from its stored view document."""
+    if kind not in KINDS:
+        raise KeyError(kind)
+    return render_source(_from_view(view), kind)
+
+
+def _src(x) -> "Source":
+    """Accept either kind of board: a Source, or a Board we build one from."""
+    return x if isinstance(x, Source) else _from_board(x)
+
+
+def render_source(src: "Source", kind: str) -> str:
     if kind == "shopping":
-        return shopping_html(board)
+        return shopping_html(src)
     if kind == "wiring":
-        return wiring_html(board)
+        return wiring_html(src)
     if kind == "poster":
-        return poster_html(board)
+        return poster_html(src)
     raise KeyError(kind)
+
+
+# --------------------------------------------------------------------------- #
+# where the facts come from
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Source:
+    """Everything the three documents need, from either kind of board."""
+
+    title: str
+    width: float
+    height: float
+    layers: int
+    thickness: float
+    finish: str
+    drc: dict
+    bom: List[dict]
+    # {ref, value, footprint, category, part_name, pins: [{num, name, net, kind}]}
+    components: List[dict]
+    # net -> [{ref, num}]
+    pins_by_net: Dict[str, List[dict]]
+    stats: dict
+    svg: str
+    imported: bool = False
+    notes: List[str] = field(default_factory=list)
+
+
+def _from_board(board: Board) -> Source:
+    b = board.board
+    components = []
+    for comp in board.data["components"]:
+        try:
+            part = parts.get(comp["part"])
+            footprint = part.get("footprint", "")
+            category = part.get("category", "")
+            part_name = part.get("name", "")
+        except KeyError:
+            footprint = comp.get("footprint", "")
+            category = ""
+            part_name = ""
+        # The footprint names a header's pins "1".."4"; the part knows they are
+        # VIN/GND/SCL/SDA. The part wins when it has a real name.
+        part_pins = {}
+        try:
+            part_pins = parts.get(comp["part"]).get("pins") or {}
+        except KeyError:
+            pass
+        pins = []
+        for p in board.world_pads(ref=comp["ref"]):
+            num = str(p["num"])
+            pins.append({
+                "num": num,
+                "name": str(part_pins.get(num) or p.get("name") or ""),
+                "net": p.get("net") or "", "kind": p.get("kind") or "",
+            })
+        components.append({
+            "ref": comp["ref"], "value": comp.get("value") or "",
+            "footprint": footprint, "category": category, "part_name": part_name,
+            "pins": pins,
+        })
+    return Source(
+        title=board.data.get("title") or "Board",
+        width=b["width"], height=b["height"], layers=b.get("layers", 2),
+        thickness=b.get("thickness", 1.6), finish=b.get("finish", "HASL"),
+        drc=board.data.get("drc") or {},
+        bom=layers.bom(board),
+        components=components,
+        pins_by_net=board.net_pins(),
+        stats=board.stats(),
+        svg=svg_mod.render_svg(board, style="product"),
+    )
+
+
+def _from_view(view: dict) -> Source:
+    b = view.get("board") or {}
+    by_net: Dict[str, List[dict]] = {}
+    for net in view.get("nets") or []:
+        name = net.get("name") or ""
+        if not name:
+            continue
+        bucket = by_net.setdefault(name, [])
+        for pin in net.get("pins") or []:
+            ref, _, num = str(pin).partition(".")
+            bucket.append({"ref": ref, "num": num})
+    components = []
+    for comp in view.get("components") or []:
+        components.append({
+            "ref": comp.get("ref", ""),
+            "value": comp.get("value") or "",
+            "footprint": comp.get("footprint") or "",
+            "category": comp.get("category") or "",
+            "part_name": comp.get("footprint") or "",
+            "pins": [{"num": str(p.get("num", "")), "name": str(p.get("name") or ""),
+                      "net": p.get("net") or "", "kind": p.get("kind") or ""}
+                     for p in comp.get("pins") or []],
+        })
+    return Source(
+        title=view.get("title") or "Board",
+        width=float(b.get("width") or 0.0), height=float(b.get("height") or 0.0),
+        layers=int(b.get("layers") or 2), thickness=float(b.get("thickness") or 1.6),
+        finish=b.get("finish") or "HASL",
+        drc=view.get("drc") or {},
+        bom=view.get("bom") or [],
+        components=components,
+        pins_by_net=by_net,
+        stats=view.get("stats") or {},
+        svg=svg_mod.render_svg_view(view, style="product"),
+        imported=True,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -109,6 +243,7 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
   font-size:12px;border:1px solid rgba(127,199,161,.35);color:var(--accent);
   background:rgba(127,199,161,.08);white-space:nowrap}
 .badge.bad{border-color:rgba(217,164,95,.4);color:var(--warn);background:rgba(217,164,95,.08)}
+.badge.quiet{border-color:var(--line);color:var(--faint);background:rgba(255,255,255,.02)}
 .conn-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:12px}
 .conn-ref{font-size:16px;font-weight:650}
 .conn-part{color:var(--faint);font-size:12px;font-family:var(--mono)}
@@ -170,17 +305,22 @@ def _shell(title_text: str, kicker: str, subtitle: str, right: str, body: str) -
     )
 
 
-def _size_line(board: Board) -> str:
-    b = board.board
-    return (f'{b["width"]:.1f} × {b["height"]:.1f} mm · {b.get("layers", 2)} layers · '
-            f'{b.get("thickness", 1.6):.2f} mm · {b.get("finish", "HASL")}')
+def _size_line(src: Source) -> str:
+    line = (f'{src.width:.1f} × {src.height:.1f} mm · {src.layers} layers · '
+            f'{src.thickness:.2f} mm · {src.finish}')
+    if src.imported:
+        line += " · imported KiCad design"
+    return line
 
 
-def _drc_badge(board: Board) -> str:
-    drc = board.data.get("drc") or {}
-    errors = len(drc.get("errors") or [])
+def _drc_badge(src: Source) -> str:
+    drc = src.drc or {}
+    note = str(drc.get("note") or "").lower()
+    if not drc or "no design-rule check" in note:
+        return '<span class="badge quiet">not DRC-checked</span>'
     if drc.get("ok"):
         return '<span class="badge">DRC clean</span>'
+    errors = len(drc.get("errors") or [])
     return f'<span class="badge bad">{errors} DRC issue(s)</span>'
 
 
@@ -232,17 +372,18 @@ def _bom_row(row: dict) -> str:
         mpn_cell = '<span class="muted">—</span>'
     return (
         f'<tr><td class="qty">{int(row.get("qty") or 1)}</td>'
-        f'<td><div class="val">{html.escape(str(row.get("value") or ""))}</div>'
+        f'<td><div class="val">{html.escape(value)}</div>'
         f'<div class="refs">{html.escape(refs)}</div></td>'
-        f'<td class="mono footprint">{html.escape(str(row.get("footprint") or ""))}</td>'
+        f'<td class="mono footprint">{html.escape(footprint)}</td>'
         f'<td class="desc">{html.escape(str(row.get("description") or ""))}</td>'
         f'<td>{mpn_cell}</td>'
         f'<td>{links}</td></tr>'
     )
 
 
-def shopping_html(board: Board) -> str:
-    rows = layers.bom(board)
+def shopping_html(src: Source) -> str:
+    src = _src(src)
+    rows = src.bom
     total = sum(int(r.get("qty") or 1) for r in rows)
     with_mpn = sum(1 for r in rows if (r.get("mpn") or "").strip())
     body = (
@@ -255,9 +396,8 @@ def shopping_html(board: Board) -> str:
         'manufacturer part number. Buy links open a distributor search for the MPN, '
         'or for the value and footprint when the MPN is not known yet.</div>'
     )
-    subtitle = f'{len(rows)} lines · {total} parts · {_size_line(board)}'
-    return _shell(board.data.get("title") or "Board", "Bill of materials",
-                  subtitle, _drc_badge(board), body)
+    subtitle = f'{len(rows)} lines · {total} parts · {_size_line(src)}'
+    return _shell(src.title, "Bill of materials", subtitle, _drc_badge(src), body)
 
 
 # --------------------------------------------------------------------------- #
@@ -265,14 +405,25 @@ def shopping_html(board: Board) -> str:
 # --------------------------------------------------------------------------- #
 
 def _is_connector(comp: dict) -> bool:
-    try:
-        part = parts.get(comp["part"])
-    except KeyError:
-        return False
-    if part.get("category") == "connector":
+    """Is this a thing you plug something into?
+
+    Works on a Source component or on a raw board component (where only the part
+    id is known and the footprint has to be looked up).
+    """
+    if comp.get("category") == "connector":
         return True
-    blob = f"{comp['part']} {part.get('footprint', '')}".lower()
-    return any(h in blob for h in _CONNECTOR_HINTS)
+    footprint = comp.get("footprint") or ""
+    part_name = comp.get("part_name") or ""
+    if not footprint and comp.get("part"):
+        try:
+            part = parts.get(comp["part"])
+        except KeyError:
+            return False
+        if part.get("category") == "connector":
+            return True
+        footprint = part.get("footprint", "")
+        part_name = part.get("name", "")
+    return any(h in f"{footprint} {part_name}".lower() for h in _CONNECTOR_HINTS)
 
 
 def _pin_sort_key(num: str):
@@ -280,21 +431,19 @@ def _pin_sort_key(num: str):
     return (0, int(text), "") if text.isdigit() else (1, 0, text)
 
 
-def _pin_data(board: Board, ref: str, by_net: Dict[str, List[dict]],
-              part_pins: Dict[str, str]) -> List[dict]:
+def _pin_data(src: Source, ref: str, pins: List[dict]) -> List[dict]:
     """One row per pad: number, semantic name, net, and what else is on that net."""
     rows = []
-    pads = sorted(board.world_pads(ref=ref), key=lambda p: _pin_sort_key(p["num"]))
-    for pad in pads:
+    for pad in sorted(pins, key=lambda p: _pin_sort_key(p["num"])):
         if pad.get("kind") == "npth":
             continue
         net = pad.get("net") or ""
-        name = str(part_pins.get(pad["num"], "") or "").strip()
+        name = str(pad.get("name") or "").strip()
         if name == str(pad["num"]):
             name = ""
         dest = ""
         if net:
-            others = [p for p in by_net.get(net, [])
+            others = [p for p in src.pins_by_net.get(net, [])
                       if not (p["ref"] == ref and p["num"] == pad["num"])]
             dest = ", ".join(f'{p["ref"]}.{p["num"]}' for p in others[:4])
             if len(others) > 4:
@@ -304,28 +453,17 @@ def _pin_data(board: Board, ref: str, by_net: Dict[str, List[dict]],
     return rows
 
 
-def wiring_html(board: Board) -> str:
-    by_net = board.net_pins()
-    connectors = [c for c in board.data["components"] if _is_connector(c)]
+def wiring_html(src: Source) -> str:
+    src = _src(src)
+    connectors = [c for c in src.components if _is_connector(c)]
     connectors.sort(key=lambda c: c["ref"])
 
     cards: List[dict] = []
     for comp in connectors:
-        ref = comp["ref"]
-        value = (comp.get("value") or "").strip()
-        fp = ""
-        part_pins: Dict[str, str] = {}
-        try:
-            part = parts.get(comp["part"])
-            fp = part.get("footprint", "")
-            part_pins = part.get("pins") or {}
-            if not value:
-                value = part.get("name", "")
-        except KeyError:
-            pass
-        rows = _pin_data(board, ref, by_net, part_pins)
+        rows = _pin_data(src, comp["ref"], comp["pins"])
         if rows:
-            cards.append({"ref": ref, "value": value, "footprint": fp, "rows": rows})
+            cards.append({"ref": comp["ref"], "value": comp.get("value") or "",
+                          "footprint": comp.get("footprint") or "", "rows": rows})
 
     # Only show the Name column when the part actually has semantic pin names:
     # a generic header's names are its numbers, and an empty column reads as a bug.
@@ -370,26 +508,27 @@ def wiring_html(board: Board) -> str:
              'net class: <span class="dot power"></span>power, '
              '<span class="dot ground"></span>ground, '
              '<span class="dot signal"></span>signal.</div>')
-    subtitle = f'{len(cards)} connector(s) · {_size_line(board)}'
-    return _shell(board.data.get("title") or "Board", "Wiring card",
-                  subtitle, _drc_badge(board), body)
+    subtitle = f'{len(cards)} connector(s) · {_size_line(src)}'
+    return _shell(src.title, "Wiring card", subtitle, _drc_badge(src), body)
 
 
 # --------------------------------------------------------------------------- #
 # board poster
 # --------------------------------------------------------------------------- #
 
-def poster_html(board: Board) -> str:
-    stats = board.stats()
-    b = board.board
-    svg = svg_mod.render_svg(board, style="product")
+def poster_html(src: Source) -> str:
+    src = _src(src)
+    stats = src.stats or {}
+    svg = src.svg
     # Strip the XML prolog if present; keep one inline <svg> for the hero.
     if svg.lstrip().startswith("<?xml"):
         svg = svg.split("?>", 1)[1].lstrip()
 
-    rows = layers.bom(board)
-    rows.sort(key=lambda r: (-int(r.get("qty") or 1), str(r.get("value") or "")))
-    top = rows[:6]
+    # every line, not a sample: a poster that hides two thirds of the BOM is a
+    # poster you cannot order from
+    rows = sorted(src.bom, key=lambda r: (-int(r.get("qty") or 1),
+                                          str(r.get("value") or "")))
+    top = rows
     bom_rows = "".join(
         f'<tr><td class="qty">{int(r.get("qty") or 1)}</td>'
         f'<td><div class="val">{html.escape(str(r.get("value") or ""))}</div>'
@@ -402,12 +541,12 @@ def poster_html(board: Board) -> str:
         f'<div class="stat"><div class="k">{html.escape(k)}</div>'
         f'<div class="v">{html.escape(str(v))}</div></div>'
         for k, v in (
-            ("Parts", stats["components"]),
-            ("Nets", stats["nets"]),
-            ("Pads", stats["pads"]),
-            ("Vias", stats["vias"]),
-            ("Area", f'{stats["area_mm2"]:.0f} mm²'),
-            ("Layers", b.get("layers", 2)),
+            ("Parts", stats.get("components", len(src.components))),
+            ("Nets", stats.get("nets", len(src.pins_by_net))),
+            ("Pads", stats.get("pads", "—")),
+            ("Vias", stats.get("vias", "—")),
+            ("Area", f'{float(stats.get("area_mm2") or 0):.0f} mm²'),
+            ("Layers", src.layers),
         )
     )
 
@@ -416,10 +555,9 @@ def poster_html(board: Board) -> str:
         f'<div class="card"><div class="stats">{stats_grid}</div></div>'
         '<div class="card"><table><thead><tr><th class="qty">Qty</th><th>Value</th>'
         f'<th>Footprint</th></tr></thead><tbody>{bom_rows}</tbody></table>'
-        f'<div class="note">Top {len(top)} of {len(rows)} BOM line(s).</div></div>'
+        f'<div class="note">{len(rows)} BOM line(s) · '
+        f'{sum(int(r.get("qty") or 1) for r in rows)} part(s).</div></div>'
         '<div class="note" style="text-align:center;margin-top:22px">'
         'Designed with Circuit · Hermes Agent</div>'
     )
-    right = _drc_badge(board)
-    return _shell(board.data.get("title") or "Board", "Board poster",
-                  _size_line(board), right, body)
+    return _shell(src.title, "Board poster", _size_line(src), _drc_badge(src), body)

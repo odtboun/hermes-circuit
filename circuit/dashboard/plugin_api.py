@@ -113,12 +113,11 @@ def docs_render(slug: str, kind: str):
     except BoardError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if board.data.get("imported"):
-        raise HTTPException(
-            status_code=409,
-            detail="documents are generated from the engine's part library, and an "
-                   "imported KiCad board has no library parts",
-        )
-    html = docs_mod.render(board, kind)
+        # No library parts, but the importer stored everything the documents need:
+        # BOM, pins, nets and copper all live in the view document.
+        html = docs_mod.render_view(store.load_view(slug), kind)
+    else:
+        html = docs_mod.render(board, kind)
     return {"board": slug, "kind": kind, "title": docs_mod.title(kind),
             "file": docs_mod.filename(kind), "html": html, "bytes": len(html)}
 

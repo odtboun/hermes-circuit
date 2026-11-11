@@ -135,7 +135,7 @@ def test_docs_routes_list_and_render(tmp_path, monkeypatch):
     assert missing.status_code == 404
 
 
-def test_docs_route_refuses_an_imported_board(tmp_path, monkeypatch):
+def test_docs_route_renders_an_imported_board(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -150,6 +150,11 @@ def test_docs_route_refuses_an_imported_board(tmp_path, monkeypatch):
     fixture = Path(__file__).resolve().parent / "fixtures" / "simple.kicad_pcb"
     slug = import_kicad.import_board(str(fixture))["board"]
 
-    res = client.get(f"/api/plugins/circuit/boards/{slug}/docs/poster")
-    assert res.status_code == 409
-    assert "imported" in res.json()["detail"]
+    # no library parts — the documents come from the stored view document instead
+    for kind in ("shopping", "wiring", "poster"):
+        res = client.get(f"/api/plugins/circuit/boards/{slug}/docs/{kind}")
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["html"].startswith("<!doctype html>")
+        assert "imported KiCad design" in body["html"]
+        assert body["bytes"] > 500

@@ -385,10 +385,7 @@ def circuit_docs(args: dict, **kwargs) -> str:
     try:
         board = _board(args)
         slug = board.data.get("slug") or ""
-        if board.data.get("imported"):
-            return err("documents are generated from the engine's part library, and an "
-                       "imported KiCad board has no library parts — call circuit_create "
-                       "to start an editable board")
+        imported = bool(board.data.get("imported"))
         wanted = (args.get("kind") or "all").strip().lower()
         if wanted not in ("all", *docs_mod.KINDS):
             return err(f"unknown document {wanted!r} (one of: all, {', '.join(docs_mod.KINDS)})")
@@ -399,7 +396,11 @@ def circuit_docs(args: dict, **kwargs) -> str:
             if wanted not in ("all", kind):
                 continue
             path = ex / docs_mod.filename(kind)
-            path.write_text(docs_mod.render(board, kind))
+            if imported:
+                # an imported board has no library parts; its view document does
+                path.write_text(docs_mod.render_view(store.load_view(slug), kind))
+            else:
+                path.write_text(docs_mod.render(board, kind))
             documents.append({
                 "kind": kind,
                 "title": docs_mod.title(kind),
