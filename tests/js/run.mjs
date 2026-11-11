@@ -86,6 +86,7 @@ const ctx = {
   // Hooks are stubbed, so the "pick a board" effect never runs: seed the
   // selected slug the same way the app does after `Open board`.
   storage: { get: (k, d) => (k === 'selected' ? 'pico-sensor-hub' : d), set() {}, remove() {} },
+  os: { openExternal: async () => true },
   onDispose: () => {},
   setTimeout: (f) => setTimeout(f, 0),
   setInterval: (f) => setInterval(f, 1000)

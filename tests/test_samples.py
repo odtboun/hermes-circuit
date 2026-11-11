@@ -7,7 +7,6 @@ bad download from being parsed as a board.
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import pytest
@@ -37,40 +36,29 @@ def test_unknown_sample_is_rejected():
 
 
 def test_html_error_page_is_not_parsed_as_a_board(monkeypatch, tmp_path):
-    class FakeResponse(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return None
-
-    monkeypatch.setattr(
-        samples.urllib.request,
-        "urlopen",
-        lambda *a, **k: FakeResponse(b"<!DOCTYPE html><html>login</html>"),
-    )
+    """A GitLab/GitHub error page must not parse as an empty board."""
+    monkeypatch.setattr(samples.netguard, "fetch",
+                        lambda *a, **k: b"<!DOCTYPE html><html>login</html>")
     with pytest.raises(BoardError) as exc:
         samples.fetch("video", tmp_path / "video.kicad_pcb")
     assert "did not return a KiCad board" in str(exc.value)
     assert not (tmp_path / "video.kicad_pcb").exists()
 
 
-def test_oversized_download_is_refused(monkeypatch, tmp_path):
-    class FakeResponse(io.BytesIO):
-        def __enter__(self):
-            return self
+def test_download_passes_the_size_cap_to_the_guard(monkeypatch, tmp_path):
+    """The cap lives in netguard now, so this pins that it is handed the catalogue's."""
+    seen = {}
 
-        def __exit__(self, *exc):
-            return None
+    def fake_fetch(url, *, max_bytes, timeout, label):
+        seen["max_bytes"] = max_bytes
+        seen["url"] = url
+        raise BoardError(f"{label} is larger than {max_bytes // (1024 * 1024)} MB — refusing")
 
-    monkeypatch.setattr(samples, "MAX_BYTES", 16)
-    monkeypatch.setattr(
-        samples.urllib.request,
-        "urlopen",
-        lambda *a, **k: FakeResponse(b"(kicad_pcb (version 20241229) " + b" " * 64),
-    )
+    monkeypatch.setattr(samples.netguard, "fetch", fake_fetch)
     with pytest.raises(BoardError) as exc:
         samples.fetch("video", tmp_path / "video.kicad_pcb")
+    assert seen["max_bytes"] == samples.MAX_BYTES
+    assert seen["url"].startswith("https://")
     assert "larger than" in str(exc.value)
 
 
@@ -78,10 +66,27 @@ def test_network_failure_is_reported_not_raised_raw(monkeypatch, tmp_path):
     def boom(*a, **k):
         raise OSError("no route to host")
 
-    monkeypatch.setattr(samples.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(samples.netguard, "fetch", boom)
     with pytest.raises(BoardError) as exc:
         samples.fetch("video", tmp_path / "video.kicad_pcb")
     assert "could not download" in str(exc.value)
+
+
+def test_a_private_address_is_refused_before_any_socket(monkeypatch, tmp_path):
+    """The catalogue goes through the same door as `circuit_import url=`."""
+    from circuit_core import netguard
+
+    real = netguard.check_url
+    seen = []
+
+    def spy(url):
+        seen.append(url)
+        return real(url)
+
+    monkeypatch.setattr(samples.netguard, "check_url", spy)
+    with pytest.raises(BoardError):
+        samples.download_board("http://127.0.0.1:8080/board.kicad_pcb", tmp_path / "x.kicad_pcb")
+    assert seen == ["http://127.0.0.1:8080/board.kicad_pcb"]
 
 
 def test_reloading_a_sample_replaces_the_same_project(monkeypatch):

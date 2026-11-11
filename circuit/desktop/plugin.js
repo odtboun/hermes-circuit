@@ -2097,17 +2097,21 @@ function emptyState(title, body) {
  *  the gerbers. It is shown in an iframe via srcDoc, so the page does not need a
  *  second origin or a file:// URL, and the document keeps its own styling.
  */
-function openExternalUrl(url) {
+// Opening a link is the plugin SDK's job, not the page's: `ctx.os.openExternal`
+// is the supported route and it answers false when the host has no way to open
+// one. Reaching for window.hermesDesktop directly would work today and break the
+// day the bridge changes shape.
+async function openExternalUrl(ctx, url) {
   try {
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return
-    const bridge = typeof window !== 'undefined' ? window.hermesDesktop : null
-    if (bridge && typeof bridge.openExternal === 'function') { bridge.openExternal(u.href); return }
-    // No bridge — a browser harness, or an app build without it. The plain window
-    // is the only route left; the app's popup policy may refuse it, and then the
-    // click is a no-op rather than a silent failure we never hear about.
-    if (typeof window !== 'undefined' && typeof window.open === 'function') window.open(u.href, '_blank', 'noopener')
-  } catch (_) { /* a malformed href is not worth a crash */ }
+    const opened = ctx.os && typeof ctx.os.openExternal === 'function'
+      ? await ctx.os.openExternal(u.href)
+      : false
+    if (!opened) console.warn(`circuit: this build cannot open ${u.href}`)
+  } catch (err) {
+    console.warn('circuit: could not open link', err && err.message ? err.message : err)
+  }
 }
 
 function DocsTab({ ctx, view, slug }) {
@@ -2152,11 +2156,11 @@ function DocsTab({ ctx, view, slug }) {
         return
       }
       if (data.type !== 'circuit-doc-open') return
-      openExternalUrl(data.url)
+      openExternalUrl(ctx, data.url)
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [])
+  }, [ctx])
 
   if (!docs.length) {
     // Two very different reasons to be empty, and only one of them is about the

@@ -10,11 +10,11 @@ render, which the bundled 13-part templates cannot.
 from __future__ import annotations
 
 import tempfile
-import urllib.request
 from urllib.parse import quote
 from pathlib import Path
 from typing import Dict, List
 
+from . import netguard
 from .import_kicad import import_board
 from .project import BoardError
 
@@ -30,18 +30,17 @@ def download_board(url: str, dest: Path, label: str = "board") -> Path:
     """Fetch a ``.kicad_pcb`` from ``url`` into ``dest``.
 
     Shared by the sample catalogue and ``circuit_import url=…`` so both get the
-    same guards: a size cap, and a rejection of anything that is not a KiCad
-    s-expression (a GitLab/GitHub error page would otherwise parse as an empty
-    board and look like a viewer bug).
+    same guards: every hop resolved and refused if it lands on a loopback, private,
+    link-local, CGNAT or metadata address (``netguard``), a size cap, and a
+    rejection of anything that is not a KiCad s-expression (a GitLab/GitHub error
+    page would otherwise parse as an empty board and look like a viewer bug).
     """
-    request = urllib.request.Request(url, headers={"User-Agent": "hermes-circuit"})
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:
-            payload = response.read(MAX_BYTES + 1)
-    except Exception as exc:  # network, DNS, TLS, HTTP status
+        payload = netguard.fetch(url, max_bytes=MAX_BYTES, timeout=_TIMEOUT_S, label=label)
+    except BoardError:
+        raise
+    except Exception as exc:  # TLS, HTTP status, a socket that died mid-read
         raise BoardError(f"could not download {label}: {exc}") from exc
-    if len(payload) > MAX_BYTES:
-        raise BoardError(f"{label} is larger than {MAX_BYTES // (1024 * 1024)} MB — refusing")
     if not payload.lstrip().startswith(b"("):
         raise BoardError(f"{label} did not return a KiCad board (got an HTML/error page)")
     dest.write_bytes(payload)
