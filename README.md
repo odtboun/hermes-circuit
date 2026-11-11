@@ -21,13 +21,39 @@ Hermes: → circuit_create(template="pico-sensor-hub")
         ::circuit{board="pico-sensor-hub"}
 ```
 
-![A routed 2-layer board: 3D model and 2D layer stackup](docs/assets/hero.png)
+![A routed two-layer board, rendered in 3D by the plugin](docs/assets/board-3d.png)
+
+---
+
+## Screenshots
+
+Two views of the same board — the 3D model the plugin renders itself, and the 2D
+layer stackup with copper, mask, silk and drills on separate toggles:
+
+| 3D | 2D |
+|---|---|
+| ![3D view](docs/assets/board-3d.png) | ![2D layer stackup](docs/assets/board-2d.png) |
+
+Exploded view separates every component from the board, taller parts rising
+further, so you can see what sits on what:
+
+![Exploded 3D view](docs/assets/board-3d-explode.png)
+
+And the three documents every board can produce — a shopping list with distributor
+search links, a wiring card, and a poster:
+
+| Shopping list | Wiring card |
+|---|---|
+| ![Shopping list](docs/assets/doc-shopping.png) | ![Wiring card](docs/assets/doc-wiring.png) |
+
+![Board poster](docs/assets/doc-poster.png)
 
 ---
 
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
+- [Screenshots](#screenshots)
 - [The 60-second demo](#the-60-second-demo)
 - [Install](#install)
 - [Your first board](#your-first-board)
