@@ -2100,6 +2100,15 @@ function DocsTab({ ctx, view, slug }) {
     enabled: Boolean(slug && kind)
   })
   if (!docs.length) {
+    // Two very different reasons to be empty, and only one of them is about the
+    // board: an imported design has no library parts to document, while a missing
+    // list means the page is newer than the backend it is talking to.
+    if (!view.docs) {
+      return emptyState(
+        'The documents need a newer backend',
+        'This plugin page knows about the shopping list, wiring card and poster, but the running backend does not serve them yet. Restart Hermes — reloading desktop plugins only reloads the page.'
+      )
+    }
     return emptyState(
       'No documents for this board',
       'The shopping list, wiring card and poster are generated from the engine part library — imported boards are read-only.'

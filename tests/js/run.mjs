@@ -376,6 +376,14 @@ globalThis.__QUERY_DATA = view
 const emptyDocs = texts(__test__.DocsTab({ ctx, view: { ...view, docs: [] }, slug: 'x' })).join(' ')
 assert.ok(emptyDocs.includes('No documents'), 'empty docs state renders')
 
+// A backend older than the page sends no docs field at all: say so, instead of
+// claiming the board has no documents.
+const stale = { ...view }
+delete stale.docs
+const staleText = texts(__test__.DocsTab({ ctx, view: stale, slug: 'x' })).join(' ')
+assert.ok(staleText.includes('newer backend'), 'stale backend is called out')
+assert.ok(!staleText.includes('No documents for this board'), 'stale backend is not blamed on the board')
+
 
 // ---- components render without a browser --------------------------------- //
 // Minimal renderer: executes function components (hooks are stubbed) and
