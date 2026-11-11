@@ -212,11 +212,17 @@ def _bom_row(row: dict) -> str:
     refs = " ".join(row.get("refs") or [])
     mpn = (row.get("mpn") or "").strip()
     mfr = (row.get("mfr") or "").strip()
+    value = str(row.get("value") or "")
+    footprint = str(row.get("footprint") or "")
+    query = (mpn or f"{value} {footprint}").strip()
     links = "".join(
-        f'<a class="pill buy" href="{html.escape(url)}" target="_blank" rel="noopener">'
+        f'<a class="pill buy" href="{html.escape(url)}" target="_blank" rel="noopener"'
+        # In the chat preview the frame cannot open a window, so a click asks the
+        # agent to do the lookup instead. Inert everywhere else.
+        f' data-hermes-send="Look up {html.escape(query)} on {html.escape(name)}: '
+        f'price, stock, and whether the package matches {html.escape(footprint)}.">'
         f'{html.escape(name)}</a>'
-        for name, url in search_links(mpn, str(row.get("value") or ""),
-                                      str(row.get("footprint") or ""))
+        for name, url in search_links(mpn, value, footprint)
     )
     if mpn:
         mpn_cell = f'<span class="mono">{html.escape(mpn)}</span>'

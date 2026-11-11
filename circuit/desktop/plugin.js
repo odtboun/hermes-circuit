@@ -2090,8 +2090,36 @@ function emptyState(title, body) {
  *  the gerbers. It is shown in an iframe via srcDoc, so the page does not need a
  *  second origin or a file:// URL, and the document keeps its own styling.
  */
+// A document is a standalone page, and the app denies window.open / target=_blank
+// from every frame (window-open-policy: GHSA-9f4c-93c8-jc8g), so a buy link inside
+// one can never reach the browser on its own. The page injects this at render
+// time — the document file stays script-free — and hands the click to the audited
+// hermesDesktop.openExternal channel instead.
+const DOC_LINK_SCRIPT =
+  '<script>(function(){' +
+  'addEventListener("click",function(e){' +
+  'var a=e.target&&e.target.closest?e.target.closest(\'a[href^="http"]\'):null;' +
+  'if(!a)return;e.preventDefault();' +
+  'parent.postMessage({type:"circuit-doc-open",url:a.href},"*")},true)})()</script>'
+
+function withDocLinks(html) {
+  if (!html) return html
+  const at = html.lastIndexOf('</body>')
+  return at === -1 ? html + DOC_LINK_SCRIPT : html.slice(0, at) + DOC_LINK_SCRIPT + html.slice(at)
+}
+
+function openExternalUrl(url) {
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return
+    const bridge = typeof window !== 'undefined' ? window.hermesDesktop : null
+    if (bridge && typeof bridge.openExternal === 'function') bridge.openExternal(u.href)
+  } catch (_) { /* a malformed href is not worth a crash */ }
+}
+
 function DocsTab({ ctx, view, slug }) {
   const docs = view.docs || []
+  const frameRef = useRef(null)
   const [kind, setKind] = useState(docs.length ? docs[0].kind : '')
   const doc = docs.find((d) => d.kind === kind) || docs[0] || null
   const q = useQuery({
@@ -2099,6 +2127,18 @@ function DocsTab({ ctx, view, slug }) {
     queryFn: () => rest(ctx, `boards/${slug}/docs/${kind}`),
     enabled: Boolean(slug && kind)
   })
+  useEffect(() => {
+    const onMessage = (event) => {
+      const frame = frameRef.current
+      if (!frame || event.source !== frame.contentWindow) return
+      const data = event.data
+      if (!data || data.type !== 'circuit-doc-open') return
+      openExternalUrl(data.url)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
   if (!docs.length) {
     // Two very different reasons to be empty, and only one of them is about the
     // board: an imported design has no library parts to document, while a missing
@@ -2124,9 +2164,12 @@ function DocsTab({ ctx, view, slug }) {
     ] }),
     html
       ? jsx('iframe', {
+          ref: frameRef,
           title: doc ? doc.title : 'document',
-          srcDoc: html,
-          sandbox: '',
+          srcDoc: withDocLinks(html),
+          // allow-scripts without allow-same-origin: the injected click handler
+          // can talk to this page, and can touch nothing else.
+          sandbox: 'allow-scripts',
           style: {
             flex: 1, width: '100%', minHeight: 320, border: `1px solid ${UI.stroke}`,
             borderRadius: 10, background: '#0a0d0b'

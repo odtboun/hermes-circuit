@@ -368,7 +368,16 @@ const findIframe = (node, depth = 0) => {
 const frame = findIframe(docsNode)
 assert.ok(frame, 'the document renders in an iframe')
 assert.ok(frame.props.srcDoc.includes('<!doctype html>'), 'the iframe gets the document html')
-assert.equal(frame.props.sandbox, '', 'documents are script-free, so the iframe is sandboxed')
+// allow-scripts without allow-same-origin: the injected click handler can reach
+// this page and nothing else
+assert.equal(frame.props.sandbox, 'allow-scripts', 'the frame is sandboxed to an opaque origin')
+
+// Buy links cannot use window.open (the app denies it for every frame), so the
+// page injects a click handler that forwards the URL to the audited bridge.
+assert.ok(frame.props.srcDoc.includes('circuit-doc-open'), 'the frame carries the link handler')
+assert.ok(!globalThis.__QUERY_DATA.html.includes('<script'), 'the document file itself stays script-free')
+assert.ok(frame.props.srcDoc.indexOf('circuit-doc-open') > frame.props.srcDoc.indexOf('</table>'),
+  'the handler is appended at the end of the body, not into the markup')
 
 // an imported board has no library parts, so no documents — say so instead of
 // rendering an empty frame
