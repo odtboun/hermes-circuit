@@ -1,4 +1,5 @@
 name: circuit
+title: Circuit
 repo: https://github.com/odtboun/hermes-circuit
 sha: 506a1b2a90b7863110ca26ec2c2b27654dedec22
 subdir: circuit
