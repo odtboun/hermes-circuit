@@ -20,7 +20,7 @@ write('node_modules/@hermes/plugin-sdk/package.json',
   JSON.stringify({ name: '@hermes/plugin-sdk', type: 'module', main: 'index.mjs' }))
 write('node_modules/@hermes/plugin-sdk/index.mjs', `
 export const host = { navigate() {}, onEvent() { return () => {} }, state: {} }
-export const useQuery = () => ({ isLoading: false, error: null, data: globalThis.__QUERY_DATA })
+export const useQuery = () => ({ isLoading: false, error: globalThis.__QUERY_ERROR || null, data: globalThis.__QUERY_DATA })
 export const useQueryClient = () => ({ invalidateQueries() {} })
 const comp = (name) => function Stub() { return { type: 'div', props: { 'data-stub': name } } }
 export const Button = comp('button')
@@ -385,13 +385,26 @@ globalThis.__QUERY_DATA = view
 const emptyDocs = texts(__test__.DocsTab({ ctx, view: { ...view, docs: [] }, slug: 'x' })).join(' ')
 assert.ok(emptyDocs.includes('No documents'), 'empty docs state renders')
 
-// A backend older than the page sends no docs field at all: say so, instead of
-// claiming the board has no documents.
+// A backend older than the page has no /docs route: say so, instead of claiming
+// the board has no documents.
 const stale = { ...view }
 delete stale.docs
+globalThis.__QUERY_ERROR = { message: 'Not Found' }
 const staleText = texts(__test__.DocsTab({ ctx, view: stale, slug: 'x' })).join(' ')
 assert.ok(staleText.includes('newer backend'), 'stale backend is called out')
 assert.ok(!staleText.includes('No documents for this board'), 'stale backend is not blamed on the board')
+globalThis.__QUERY_ERROR = null
+
+// ...and when the board document lacks the list but the index route answers,
+// the tab still lists the documents
+globalThis.__QUERY_DATA = { documents: [
+  { kind: 'shopping', title: 'Shopping list', file: 'bom.html' },
+  { kind: 'wiring', title: 'Wiring card', file: 'wiring.html' },
+  { kind: 'poster', title: 'Board poster', file: 'poster.html' }
+] }
+const fromIndex = texts(__test__.DocsTab({ ctx, view: stale, slug: 'x' })).join(' ')
+assert.ok(fromIndex.includes('Wiring card'), 'the index route fills the list')
+globalThis.__QUERY_DATA = view
 
 
 // ---- components render without a browser --------------------------------- //

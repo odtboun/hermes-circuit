@@ -186,12 +186,19 @@ def _score(comp: dict, x: float, y: float, rot: float,
 
 def _relax(board: Board, boxes: List[Tuple[float, float, float, float]], gap: float,
            passes: int) -> None:
+    """Nudge parts towards their neighbours, never onto each other.
+
+    The boxes are keyed by ref: `boxes` arrives in placement order, which is not
+    component order, so indexing it by the loop position checked every part against
+    somebody else's courtyard and quietly allowed real overlaps.
+    """
     comps = board.data["components"]
     conn = _connectivity(board)
     w, h = board.board["width"], board.board["height"]
     by_ref = {c["ref"]: c for c in comps}
+    box_of = {c["ref"]: _bbox_at(c, c["x"], c["y"], c.get("rot", 0.0)) for c in comps}
     for _ in range(passes):
-        for i, c in enumerate(comps):
+        for c in comps:
             if _is_connector(c) or c.get("locked"):
                 continue
             nbrs = [by_ref[r] for r in conn.get(c["ref"], {}) if by_ref.get(r)]
@@ -204,11 +211,12 @@ def _relax(board: Board, boxes: List[Tuple[float, float, float, float]], gap: fl
             nx = min(max(c["x"] + dx, MARGIN + cw / 2), w - MARGIN - cw / 2)
             ny = min(max(c["y"] + dy, MARGIN + ch / 2), h - MARGIN - ch / 2)
             box = _bbox_at(c, nx, ny, c["rot"])
-            others = [b for j, b in enumerate(boxes) if j != i]
+            others = [b for r, b in box_of.items() if r != c["ref"]]
             if _overlaps(box, others, gap * 0.8):
                 continue
-            boxes[i] = box
+            box_of[c["ref"]] = box
             c["x"], c["y"] = round(nx, 2), round(ny, 2)
+    boxes[:] = list(box_of.values())
 
 
 def suggest_size(board: Board, fill: float = 0.55) -> Tuple[float, float]:

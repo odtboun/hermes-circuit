@@ -2132,10 +2132,27 @@ function openExternalUrl(url) {
 }
 
 function DocsTab({ ctx, view, slug }) {
-  const docs = view.docs || []
+  // The board document normally carries the list, but the tab must not depend on
+  // that field: an older backend, or a cached board response, would leave it
+  // empty and the tab would claim the board has no documents. The index route is
+  // the source of truth.
+  const index = useQuery({
+    queryKey: ['circuit', 'docs', slug],
+    queryFn: () => rest(ctx, `boards/${slug}/docs`),
+    enabled: Boolean(slug),
+    retry: 1
+  })
+  const listed = (view.docs && view.docs.length)
+    ? view.docs
+    : (index.data && index.data.documents) || []
+  const docs = listed
   const frameRef = useRef(null)
   const [docHeight, setDocHeight] = useState(0)
-  const [kind, setKind] = useState(docs.length ? docs[0].kind : '')
+  const [picked, setKind] = useState('')
+  // The list can arrive after the first render (index route), so the selection
+  // falls back to the first document instead of staying empty — an empty kind
+  // asked the backend for /docs/ and got a 404.
+  const kind = picked || (docs[0] && docs[0].kind) || ''
   const doc = docs.find((d) => d.kind === kind) || docs[0] || null
   const q = useQuery({
     queryKey: ['circuit', 'doc', slug, kind],
@@ -2163,11 +2180,14 @@ function DocsTab({ ctx, view, slug }) {
     // Two very different reasons to be empty, and only one of them is about the
     // board: an imported design has no library parts to document, while a missing
     // list means the page is newer than the backend it is talking to.
-    if (!view.docs) {
+    if (index.error) {
       return emptyState(
         'The documents need a newer backend',
-        'This plugin page knows about the shopping list, wiring card and poster, but the running backend does not serve them yet. Restart Hermes — reloading desktop plugins only reloads the page.'
+        `This page knows about the shopping list, wiring card and poster, but the running backend does not serve them (${index.error.message}). Restart Hermes — reloading desktop plugins only reloads the page.`
       )
+    }
+    if (index.isLoading) {
+      return emptyState('Loading documents…', 'Asking the backend which documents this board has.')
     }
     return emptyState(
       'No documents for this board',

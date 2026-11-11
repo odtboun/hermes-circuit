@@ -154,6 +154,11 @@ class Board:
         self._pad_cache: Optional[List[dict]] = None
 
     def touch(self) -> None:
+        # Anything that moves or edits a component calls this, so the cached pad
+        # positions are stale from here on. Without the invalidation the router
+        # routed to where the parts used to be: traces crossed real pads and nets
+        # came back unrouted on a board that looked fine.
+        self._pad_cache = None
         # SOURCE_DATE_EPOCH pins the stamp as well: board.json is part of the
         # export package, and a moving timestamp there makes every hash in the
         # manifest change on each build.

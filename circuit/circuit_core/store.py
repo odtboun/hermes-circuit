@@ -161,7 +161,7 @@ def load_view(slug: str) -> dict:
             # view.json without them. Add the list on the way out so the page
             # offers the Docs tab without needing a rebuild first. Imported boards
             # have no library parts, so they legitimately have none.
-            if "docs" not in doc:
+            if not doc.get("docs"):
                 from .fab import docs as docs_mod
 
                 doc["docs"] = [{"kind": k, "title": t, "file": f}

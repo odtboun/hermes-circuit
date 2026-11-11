@@ -27,7 +27,7 @@ from array import array
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import geom
-from .project import Board
+from .project import Board, net_class
 
 LAYERS = ("F.Cu", "B.Cu")
 VIA_COST = 16.0
@@ -163,17 +163,32 @@ class Router:
         bx = geom.bbox(poly)
         r_hard = self.r["clearance"] + self.max_half + 0.02
         r_soft = r_hard + 0.12
+        # A via is copper on BOTH layers with an annular ring around the drill, so
+        # it has to clear a pad just like a trace does. Without this the router
+        # happily drops a via 0.02 mm from an SOIC pin: the pad blocked traces but
+        # never vias.
+        r_via = self.via_radius
+        reach = max(r_soft, r_via)
         for layer in layers:
             own = self.owner[layer]
             pen = self.pen[layer]
-            ix0, iy0 = self.cell_of(bx[0] - r_soft, bx[1] - r_soft)
-            ix1, iy1 = self.cell_of(bx[2] + r_soft, bx[3] + r_soft)
+            vinc = self.vowner[layer]
+            ix0, iy0 = self.cell_of(bx[0] - reach, bx[1] - reach)
+            ix1, iy1 = self.cell_of(bx[2] + reach, bx[3] + reach)
             for iy in range(iy0, iy1 + 1):
                 row = iy * self.nx
                 for ix in range(ix0, ix1 + 1):
                     if own[row + ix] == _BLOCKED:
                         continue
                     d = geom.pad_distance_to_point(pad, ix * self.grid, iy * self.grid)
+                    if d <= r_via:
+                        vo = vinc[row + ix]
+                        if vo == _FREE:
+                            vinc[row + ix] = net_id
+                        elif vo != net_id and vo != _BLOCKED:
+                            # within reach of two pads on different nets: a via here
+                            # is too close to one of them whichever net it carries
+                            vinc[row + ix] = _BLOCKED
                     if d <= r_hard:
                         if own[row + ix] in (_FREE, net_id):
                             own[row + ix] = net_id
@@ -297,11 +312,19 @@ class Router:
     # ------------------------------------------------------------------ #
     # main entry
     # ------------------------------------------------------------------ #
+    def _class_rank(self, net: str) -> int:
+        cls = (self.board.data["nets"].get(net) or {}).get("class") or net_class(net)
+        return {"power": 0, "ground": 1}.get(cls, 2)
+
     def route(self) -> dict:
         started = time.time()
         nets = self.board.net_pins()
         routable = {n: p for n, p in nets.items() if len(p) >= 2}
-        order = sorted(routable, key=lambda n: self._net_span(routable[n]))
+        # Power and ground first, then signals by span. They are the backbone of a
+        # 2-layer board: routed last, they have to weave around everything already
+        # placed and end up in islands. Routed first, everything else fills in.
+        order = sorted(routable, key=lambda n: (self._class_rank(n),
+                                                self._net_span(routable[n])))
         for i, net in enumerate(sorted(nets), start=1):
             self.net_ids[net] = i
             self.id_nets[i] = net
@@ -345,7 +368,8 @@ class Router:
                     break
                 pad, path = best
                 remaining.remove(pad)
-                segments.extend(self._path_segments(path, width))
+                drawn = self._path_segments(path, width)
+                segments.extend(drawn)
                 tree.extend(path)
                 for a, b in zip(path, path[1:]):
                     la, ca = divmod(a, self.size)
@@ -361,10 +385,22 @@ class Router:
                                          "drill": self.r["via_drill"]})
                 r_hard = width / 2.0 + self.r["clearance"] + self.max_half
                 r_soft = r_hard + 0.15
-                for s in path[::2]:
-                    layer, cell = divmod(s, self.size)
-                    ix, iy = cell % self.nx, cell // self.nx
-                    self._claim(layer, ix * self.grid, iy * self.grid, r_hard, r_soft, net_id)
+                # Claim the copper that will actually be drawn, not the grid cells
+                # it came from: the segments are chamfered at corners, and a 0.35 mm
+                # corner cut swings the trace inside the cell it nominally occupies,
+                # which is how a trace ended up on top of a via 0.1 mm away.
+                for seg in drawn:
+                    layer = 0 if seg["layer"] == "F.Cu" else 1
+                    pts = seg["points"]
+                    for i in range(len(pts) - 1):
+                        ax, ay = pts[i]
+                        bx, by = pts[i + 1]
+                        length = math.hypot(bx - ax, by - ay)
+                        steps = max(1, int(length / (self.grid * 0.5)))
+                        for k in range(steps + 1):
+                            t = k / steps
+                            self._claim(layer, ax + (bx - ax) * t, ay + (by - ay) * t,
+                                        r_hard, r_soft, net_id)
             if segments:
                 routes[net] = _merge_segments(segments)
 
