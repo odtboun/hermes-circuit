@@ -295,13 +295,25 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
 # link inside one cannot reach the browser on its own. This forwarder hands the URL
 # to the page that embeds the document, which opens it through the audited
 # openExternal channel. Inert anywhere else: no parent, no listener, no effect.
+#
+# The same script reports how tall the document is. The page sizes the frame to
+# that number, so a 6000 px shopping list is one scroll in the tab instead of a
+# 320 px window with its own scrollbar inside it.
 _LINK_SCRIPT = (
     "<script>(function(){"
+    "function size(){"
+    "var d=document.documentElement,b=document.body;"
+    "var h=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);"
+    "if(h>0&&window.parent&&window.parent!==window)"
+    "parent.postMessage({type:'circuit-doc-size',height:h},'*')}"
+    "if(document.readyState==='complete')size();else addEventListener('load',size);"
+    "setTimeout(size,80);setTimeout(size,400);addEventListener('resize',size);"
     "addEventListener('click',function(e){"
     "var a=e.target&&e.target.closest?e.target.closest('a[href^=\"http\"]'):null;"
     "if(!a||!window.parent||window.parent===window)return;"
     "e.preventDefault();"
-    "parent.postMessage({type:'circuit-doc-open',url:a.href},'*')},true)})()</script>"
+    "parent.postMessage({type:'circuit-doc-open',url:a.href},'*')},true)"
+    "})()</script>"
 )
 
 

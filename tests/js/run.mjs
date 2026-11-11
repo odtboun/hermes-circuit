@@ -372,6 +372,26 @@ assert.ok(frame.props.srcDoc.includes('<!doctype html>'), 'the iframe gets the d
 // this page and nothing else
 assert.equal(frame.props.sandbox, 'allow-scripts', 'the frame is sandboxed to an opaque origin')
 
+// The frame fills the tab before the document reports its height, then becomes as
+// tall as the document and the tab scrolls — a 10 000 px shopping list must not be
+// a 320 px window with its own scrollbar.
+assert.equal(frame.props.style.height, '100%', 'the frame fills the tab until it is measured')
+const frameParent = (() => {
+  const walk = (node, depth = 0) => {
+    if (!node || typeof node !== 'object' || depth > 8) return null
+    const kids = [].concat((node.props && node.props.children) || [])
+    if (kids.some((c) => c && c.type === 'iframe')) return node
+    for (const c of kids) {
+      const hit = walk(c, depth + 1)
+      if (hit) return hit
+    }
+    return null
+  }
+  return walk(docsNode)
+})()
+assert.ok(frameParent, 'the frame is wrapped')
+assert.equal(frameParent.props.style.overflowY, 'auto', 'the tab scrolls, not the frame')
+
 // The page must not inject markup into the document (the catalog validator refuses
 // it): the document carries its own buy-link forwarder, and the page only listens.
 assert.equal(frame.props.srcDoc, globalThis.__QUERY_DATA.html,

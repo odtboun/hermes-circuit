@@ -2178,17 +2178,28 @@ function DocsTab({ ctx, view, slug }) {
       doc ? jsx('span', { style: { fontSize: 11.5, color: UI.faint }, children: `${doc.file}${kb ? ` · ${kb}` : ''}` }) : null
     ] }),
     html
-      ? jsx('iframe', {
-          ref: frameRef,
-          title: doc ? doc.title : 'document',
-          srcDoc: html,
-          // allow-scripts without allow-same-origin: the injected click handler
-          // can talk to this page, and can touch nothing else.
-          sandbox: 'allow-scripts',
-          style: {
-            width: '100%', height: Math.max(320, docHeight || 320), border: `1px solid ${UI.stroke}`,
-            borderRadius: 10, background: '#0a0d0b', display: 'block'
-          }
+      // The frame is as tall as the document, and the tab is what scrolls — the
+      // document is one page, not a viewport with its own scrollbar inside a
+      // viewport. Until the document reports its height the frame fills the tab,
+      // the same way the board view does.
+      ? jsx('div', {
+          style: { flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', borderRadius: 10 },
+          children: jsx('iframe', {
+            ref: frameRef,
+            title: doc ? doc.title : 'document',
+            srcDoc: html,
+            // allow-scripts without allow-same-origin: the injected click handler
+            // can talk to this page, and can touch nothing else.
+            sandbox: 'allow-scripts',
+            style: {
+              width: '100%',
+              height: docHeight ? docHeight : '100%',
+              border: `1px solid ${UI.stroke}`,
+              borderRadius: 10,
+              background: '#0a0d0b',
+              display: 'block'
+            }
+          })
         })
       : jsx('div', { style: { ...panel, padding: '18px 20px', fontSize: 12.5, color: UI.dim }, children: q.error ? `Could not render ${kind}: ${q.error.message}` : 'Rendering…' })
   ] })
