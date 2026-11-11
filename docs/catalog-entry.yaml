@@ -1,6 +1,6 @@
 name: circuit
 repo: https://github.com/odtboun/hermes-circuit
-sha: 7b411532530ca60f62ac40a35f6006b580a1c1e3
+sha: b561fff9ff40f245ea724a973f56903af8cd58a0
 subdir: circuit
 description: Design real PCBs by talking to your agent — a two-layer board compiler with a
   part library, deterministic placement, autorouting, an independent DRC, and a fabrication
@@ -12,13 +12,13 @@ category: tools
 requires_hermes: ">=0.21.5"
 docs_url: https://github.com/odtboun/hermes-circuit#readme
 version: "1.0.0"
-image: https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/catalog-banner.png
+image: https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/catalog-banner.png
 screenshots:
-  - https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/board-3d.png
-  - https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/board-2d.png
-  - https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/doc-shopping.png
-  - https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/doc-wiring.png
-  - https://raw.githubusercontent.com/odtboun/hermes-circuit/7b411532530ca60f62ac40a35f6006b580a1c1e3/docs/assets/doc-poster.png
+  - https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/board-3d.png
+  - https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/board-2d.png
+  - https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/doc-shopping.png
+  - https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/doc-wiring.png
+  - https://raw.githubusercontent.com/odtboun/hermes-circuit/b561fff9ff40f245ea724a973f56903af8cd58a0/docs/assets/doc-poster.png
 readme: true
 platforms: []
 capabilities:
