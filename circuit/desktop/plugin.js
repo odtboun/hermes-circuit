@@ -2102,7 +2102,11 @@ function openExternalUrl(url) {
     const u = new URL(url)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return
     const bridge = typeof window !== 'undefined' ? window.hermesDesktop : null
-    if (bridge && typeof bridge.openExternal === 'function') bridge.openExternal(u.href)
+    if (bridge && typeof bridge.openExternal === 'function') { bridge.openExternal(u.href); return }
+    // No bridge — a browser harness, or an app build without it. The plain window
+    // is the only route left; the app's popup policy may refuse it, and then the
+    // click is a no-op rather than a silent failure we never hear about.
+    if (typeof window !== 'undefined' && typeof window.open === 'function') window.open(u.href, '_blank', 'noopener')
   } catch (_) { /* a malformed href is not worth a crash */ }
 }
 
@@ -2129,6 +2133,9 @@ function DocsTab({ ctx, view, slug }) {
   // asked the backend for /docs/ and got a 404.
   const kind = picked || (docs[0] && docs[0].kind) || ''
   const doc = docs.find((d) => d.kind === kind) || docs[0] || null
+  // The frame is sized to the document on screen. Switching to a shorter one has
+  // to reset it first, or the wiring card would sit in a 10 000 px frame.
+  useEffect(() => { setDocHeight(0) }, [kind])
   const q = useQuery({
     queryKey: ['circuit', 'doc', slug, kind],
     queryFn: () => rest(ctx, `boards/${slug}/docs/${kind}`),
@@ -2191,6 +2198,15 @@ function DocsTab({ ctx, view, slug }) {
             // allow-scripts without allow-same-origin: the injected click handler
             // can talk to this page, and can touch nothing else.
             sandbox: 'allow-scripts',
+            // The document only forwards buy-link clicks once it knows this page is
+            // listening. In the chat preview the app owns the click, and a frame
+            // that grabbed it there would post the URL to nobody.
+            onLoad: () => {
+              const frame = frameRef.current
+              try {
+                if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: 'circuit-doc-hello' }, '*')
+              } catch (_) { /* a frame that is not ready yet says nothing */ }
+            },
             style: {
               width: '100%',
               height: docHeight ? docHeight : '100%',

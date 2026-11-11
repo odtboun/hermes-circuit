@@ -371,6 +371,9 @@ assert.ok(frame.props.srcDoc.includes('<!doctype html>'), 'the iframe gets the d
 // allow-scripts without allow-same-origin: the injected click handler can reach
 // this page and nothing else
 assert.equal(frame.props.sandbox, 'allow-scripts', 'the frame is sandboxed to an opaque origin')
+// The document only intercepts buy links once this page says hello; in the chat
+// preview the app owns the click and must not be pre-empted.
+assert.equal(typeof frame.props.onLoad, 'function', 'the page greets the document on load')
 
 // The frame fills the tab before the document reports its height, then becomes as
 // tall as the document and the tab scrolls — a 10 000 px shopping list must not be

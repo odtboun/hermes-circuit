@@ -294,23 +294,35 @@ tbody tr:hover{background:rgba(127,199,161,.045)}
 # The desktop app denies window.open and target=_blank from every frame, so a buy
 # link inside one cannot reach the browser on its own. This forwarder hands the URL
 # to the page that embeds the document, which opens it through the audited
-# openExternal channel. Inert anywhere else: no parent, no listener, no effect.
+# openExternal channel.
+#
+# It only takes over once that page says hello. The same document also renders in
+# the chat preview, where the app owns link handling and the parent is not ours:
+# calling preventDefault there would swallow the click and post the URL to nobody,
+# which is exactly how the buy buttons stopped working. No hello, no interception.
 #
 # The same script reports how tall the document is. The page sizes the frame to
 # that number, so a 6000 px shopping list is one scroll in the tab instead of a
-# 320 px window with its own scrollbar inside it.
+# 320 px window with its own scrollbar inside it. It measures body, not the root
+# element: the root reports the viewport when the frame is taller than the content,
+# so a frame sized for a long list would never shrink back for the wiring card.
+# (No // comments inside the script — the string has no newlines, so one would
+# comment out the rest of it.)
 _LINK_SCRIPT = (
     "<script>(function(){"
     "function size(){"
-    "var d=document.documentElement,b=document.body;"
-    "var h=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);"
+    "var b=document.body,d=document.documentElement;"
+    "var h=b?b.scrollHeight:(d?d.scrollHeight:0);"
     "if(h>0&&window.parent&&window.parent!==window)"
     "parent.postMessage({type:'circuit-doc-size',height:h},'*')}"
     "if(document.readyState==='complete')size();else addEventListener('load',size);"
     "setTimeout(size,80);setTimeout(size,400);addEventListener('resize',size);"
+    "var hosted=false;"
+    "addEventListener('message',function(e){"
+    "if(e.data&&e.data.type==='circuit-doc-hello')hosted=true});"
     "addEventListener('click',function(e){"
     "var a=e.target&&e.target.closest?e.target.closest('a[href^=\"http\"]'):null;"
-    "if(!a||!window.parent||window.parent===window)return;"
+    "if(!a||!hosted||!window.parent||window.parent===window)return;"
     "e.preventDefault();"
     "parent.postMessage({type:'circuit-doc-open',url:a.href},'*')},true)"
     "})()</script>"
